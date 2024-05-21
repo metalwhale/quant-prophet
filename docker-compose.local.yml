@@ -1,0 +1,9 @@
+services:
+  collector:
+    build:
+      context: ./collector
+      dockerfile: Dockerfile.local
+    volumes:
+      - ./data/:/usr/src/quant-prophet/data/
+    tty: true
+    working_dir: /usr/src/qlib/
