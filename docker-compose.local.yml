@@ -7,3 +7,11 @@ services:
       - ./data/:/usr/src/quant-prophet/data/
     tty: true
     working_dir: /usr/src/qlib/
+  trainer:
+    build:
+      context: ./trainer
+      dockerfile: Dockerfile.local
+    volumes:
+      - ./:/usr/src/quant-prophet/
+    tty: true
+    working_dir: /usr/src/quant-prophet/
