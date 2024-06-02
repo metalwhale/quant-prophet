@@ -108,7 +108,6 @@ class TradingPlatform(gym.Env):
     # Its sole purpose currently seems to be only preventing holding a position too long, causing a loss before earning.
     # Does it still make sense since we are always holding every day?
     _position_holding_daily_fee: float  # Positive ratio
-    _max_position_loss: float  # Positive ratio
     _max_balance_loss: float  # Positive ratio
     _min_positions_num: int  # Minimum number of positions (greater than 1) allowed in one episode
     _min_steps_num: int  # Minimum number of steps allowed in one episode
@@ -132,7 +131,6 @@ class TradingPlatform(gym.Env):
         last_training_date: datetime.date,
         position_opening_fee: float,
         position_holding_daily_fee: float,
-        max_position_loss: float,
         max_balance_loss: float,
         min_positions_num: int = 1,
         min_steps_num: int = 1,
@@ -144,7 +142,6 @@ class TradingPlatform(gym.Env):
         self._last_training_date = last_training_date  # TODO: Check if there are enough days to retrieve historical data
         self._position_opening_fee = position_opening_fee
         self._position_holding_daily_fee = position_holding_daily_fee
-        self._max_position_loss = max_position_loss
         self._max_balance_loss = max_balance_loss
         self._min_positions_num = min_positions_num
         self._min_steps_num = min_steps_num
@@ -190,19 +187,21 @@ class TradingPlatform(gym.Env):
         self._date += datetime.timedelta(days=1)
         self._retrieve_prices()
         reward = self._positions[-1].order.amount * -self._position_holding_daily_fee  # Holding fee
-        if action != int(self._positions[-1].order.order_type):  # Close the current position and open a new one
+        # If the order type changes, close the current position and open a new one
+        if action != int(self._positions[-1].order.order_type):
+            # Previous position's net
             reward += self._positions[-1].order.amount * self._last_position_net_ratio
             self._positions.append(Position(
                 Order(self._prices[-1].time, self._ORDER_AMOUNT, OrderType(action)),
                 self._prices[-1].actual_price,
             ))
             reward += self._positions[-1].order.amount * -self._position_opening_fee  # Opening fee
+        # Last position's net
+        last_postion_net = self._positions[-1].order.amount * self._last_position_net_ratio
         # Termination condition
         terminated = (
-            # Margin called
-            self._last_position_net_ratio < -self._max_position_loss
             # Liquidated
-            or self._balance < self._INITIAL_BALANCE * (1 - self._max_balance_loss)
+            self._balance + reward + last_postion_net < self._INITIAL_BALANCE * (1 - self._max_balance_loss)
             # Normally finished the episode without being forced to quit
             or (
                 len(self._positions) >= self._min_positions_num
@@ -212,9 +211,8 @@ class TradingPlatform(gym.Env):
         )
         # Truncation condition
         truncated = self._date >= self._last_training_date
-        # The last net
         if terminated or truncated:
-            reward += self._positions[-1].order.amount * self._last_position_net_ratio
+            reward += last_postion_net
         # Treat the balance as a cumulative reward in each episode
         self._balance += reward
         observation = self._obtain_observation()
