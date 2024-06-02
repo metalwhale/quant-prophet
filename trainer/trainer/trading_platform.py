@@ -1,6 +1,7 @@
 import datetime
+import logging
 from enum import IntEnum
-from typing import Any, Dict, List, SupportsFloat
+from typing import Any, Dict, List, SupportsFloat, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -10,28 +11,20 @@ from matplotlib import markers
 from .asset import DailyAsset, Price
 
 
-class PositionType(IntEnum):
+class OrderType(IntEnum):
     LONG = 0
     SHORT = 1
 
 
-class Position:
+class Order:
     _time: datetime.datetime
     _amount: float
-    _entry_price: float
-    _position_type: PositionType
+    _order_type: OrderType
 
-    def __init__(
-        self,
-        time: datetime.datetime,
-        amount: float,
-        entry_price: float,
-        position_type: PositionType,
-    ) -> "Position":
+    def __init__(self, time: datetime.datetime, amount: float, order_type: OrderType) -> "Order":
         self._time = time
         self._amount = amount
-        self._entry_price = entry_price
-        self._position_type = position_type
+        self._order_type = order_type
 
     @property
     def time(self) -> datetime.datetime:
@@ -42,12 +35,25 @@ class Position:
         return self._amount
 
     @property
-    def entry_price(self) -> float:
-        return self._entry_price
+    def order_type(self) -> OrderType:
+        return self._order_type
+
+
+class Position:
+    _order: Order
+    _entry_price: float
+
+    def __init__(self, order: Order, entry_price: float) -> "Position":
+        self._order = order
+        self._entry_price = entry_price
 
     @property
-    def position_type(self) -> PositionType:
-        return self._position_type
+    def order(self) -> Order:
+        return self._order
+
+    @property
+    def entry_price(self) -> float:
+        return self._entry_price
 
 
 # Doc:
@@ -116,7 +122,7 @@ class TradingPlatform(gym.Env):
     _balance: float  # Resets to initial balance after each episode
 
     # Constants
-    _POSITION_AMOUNT: float = 1  # Equal to or less than the initial balance
+    _ORDER_AMOUNT: float = 1  # Equal to or less than the initial balance
     _INITIAL_BALANCE: float = 1
 
     def __init__(
@@ -145,16 +151,16 @@ class TradingPlatform(gym.Env):
         # State components
         self._prices = []
         # Environment
-        self.action_space = gym.spaces.Discrete(len(PositionType))
+        self.action_space = gym.spaces.Discrete(len(OrderType))
         self.observation_space = gym.spaces.Dict({
             # Suppose that price deltas (ratio) are greater than -1 and less than 1,
             # meaning price never drops to 0 and never doubles from previous day.
             "historical_price_deltas": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
-            # Position types have the same values as action space.
-            "position_type": gym.spaces.Discrete(len(PositionType)),
-            # Similar to price deltas, suppose that position earning ratio is in range (-1, 1) compared to entry price.
-            # TODO: Consider cases when position earning ratio can be greater than 1.
-            "position_earning_ratio": gym.spaces.Box(-1, 1, shape=(1,)),
+            # Order types have the same values as action space.
+            "order_type": gym.spaces.Discrete(len(OrderType)),
+            # Similar to price deltas, suppose that position net ratio is in range (-1, 1) compared to entry price.
+            # TODO: Consider cases when position net ratio can be greater than 1.
+            "position_net_ratio": gym.spaces.Box(-1, 1, shape=(1,)),
         })
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Dict[str, Any], dict[str, Any]]:
@@ -171,11 +177,11 @@ class TradingPlatform(gym.Env):
         self._date = self._initial_date
         self._retrieve_prices()
         self._positions = [Position(
-            self._prices[-1].time,
-            self._POSITION_AMOUNT, self._prices[-1].actual_price,
-            self.np_random.choice([PositionType.LONG, PositionType.SHORT]),
+            Order(self._prices[-1].time, self._ORDER_AMOUNT, self.np_random.choice([OrderType.LONG, OrderType.SHORT])),
+            self._prices[-1].actual_price,
         )]  # First position
-        self._balance = self._INITIAL_BALANCE + self._positions[-1].amount * -self._position_opening_fee  # Opening fee
+        self._balance = self._INITIAL_BALANCE + \
+            self._positions[-1].order.amount * -self._position_opening_fee  # Opening fee
         observation = self._obtain_observation()
         info = {}
         return observation, info
@@ -183,32 +189,32 @@ class TradingPlatform(gym.Env):
     def step(self, action: np.int64) -> tuple[Dict[str, Any], SupportsFloat, bool, bool, dict[str, Any]]:
         self._date += datetime.timedelta(days=1)
         self._retrieve_prices()
-        reward = self._positions[-1].amount * -self._position_holding_daily_fee  # Holding fee
-        if action != int(self._positions[-1].position_type):  # Close the current position and open a new one
-            reward += self._positions[-1].amount * self._last_position_earning_ratio
+        reward = self._positions[-1].order.amount * -self._position_holding_daily_fee  # Holding fee
+        if action != int(self._positions[-1].order.order_type):  # Close the current position and open a new one
+            reward += self._positions[-1].order.amount * self._last_position_net_ratio
             self._positions.append(Position(
-                self._prices[-1].time,
-                self._POSITION_AMOUNT, self._prices[-1].actual_price, PositionType(action),
+                Order(self._prices[-1].time, self._ORDER_AMOUNT, OrderType(action)),
+                self._prices[-1].actual_price,
             ))
-            reward += self._positions[-1].amount * -self._position_opening_fee  # Opening fee
+            reward += self._positions[-1].order.amount * -self._position_opening_fee  # Opening fee
         # Termination condition
         terminated = (
             # Margin called
-            self._last_position_earning_ratio < -self._max_position_loss
+            self._last_position_net_ratio < -self._max_position_loss
             # Liquidated
             or self._balance < self._INITIAL_BALANCE * (1 - self._max_balance_loss)
             # Normally finished the episode without being forced to quit
             or (
                 len(self._positions) >= self._min_positions_num
                 # Number of steps equals the number of dates between the date of first position and the current date.
-                and (self._date - self._positions[0].time.date()).days >= self._min_steps_num
+                and (self._date - self._positions[0].order.time.date()).days >= self._min_steps_num
             )
         )
         # Truncation condition
         truncated = self._date >= self._last_training_date
-        # The last earning
+        # The last net
         if terminated or truncated:
-            reward += self._positions[-1].amount * self._last_position_earning_ratio
+            reward += self._positions[-1].order.amount * self._last_position_net_ratio
         # Treat the balance as a cumulative reward in each episode
         self._balance += reward
         observation = self._obtain_observation()
@@ -229,9 +235,9 @@ class TradingPlatform(gym.Env):
             [p.actual_price for p in prices],
         )
         for position in self._positions:
-            is_long = position.position_type == PositionType.LONG
+            is_long = position.order.order_type == OrderType.LONG
             axes.plot(
-                position.time, position.entry_price,
+                position.order.time, position.entry_price,
                 marker=markers.CARETUP if is_long else markers.CARETDOWN,
                 color="green" if is_long else "red",
             )
@@ -241,14 +247,41 @@ class TradingPlatform(gym.Env):
         plt.close(figure)
         return image
 
+    def calc_earning(self, orders: List[Order]) -> Tuple[float, float]:
+        if len(orders) < 2:
+            return (0, 0)
+        earning = 0
+        # Nets and fees of closed positions (excluding the last position, as it is probably not yet closed)
+        for prev_order, cur_order in zip(orders[:-1], orders[1:]):
+            prev_price = self._retrieve_price(prev_order.time)
+            cur_price = self._retrieve_price(cur_order.time)
+            # Opening fee
+            earning += prev_order.amount * -self._position_opening_fee
+            # Holding fee
+            earning += (cur_order.time.date() - prev_order.time.date()).days * \
+                prev_order.amount * -self._position_holding_daily_fee
+            # Position Earning
+            earning += (cur_price / prev_price - 1) * (1 if prev_order.order_type == OrderType.LONG else -1) \
+                * prev_order.amount
+            logging.debug("%s %f %s", prev_order.time, prev_price, prev_order.order_type)
+        # Last position plays a closing role and doesn't contribute to the earning
+        logging.debug("%s %f %s", orders[-1].time, self._retrieve_price(orders[-1].time), orders[-1].order_type)
+        # Actual price change
+        price_change = (self._retrieve_price(orders[-1].time) - self._retrieve_price(orders[0].time)) \
+            * 1 * orders[0].amount  # Pure price change equals a LONG order, hence `1` instead of `-1`
+        return earning, price_change
+
     @property
-    def _last_position_earning_ratio(self) -> float:
+    def _last_position_net_ratio(self) -> float:
         return (self._prices[-1].actual_price / self._positions[-1].entry_price - 1) \
-            * (1 if self._positions[-1].position_type == PositionType.LONG else -1)
+            * (1 if self._positions[-1].order.order_type == OrderType.LONG else -1)
 
     @property
     def _asset(self) -> DailyAsset:
         return self._asset_pool[self._asset_index]
+
+    def _retrieve_price(self, time: datetime.datetime) -> float:
+        return self._asset.retrieve_historical_prices(time, 2)[-1].actual_price
 
     def _retrieve_prices(self):
         # Since `retrieve_historical_prices` chooses the end price from a random time on the same end date,
@@ -261,6 +294,6 @@ class TradingPlatform(gym.Env):
     def _obtain_observation(self) -> Dict[str, Any]:
         return {
             "historical_price_deltas": [p.price_delta for p in self._prices],
-            "position_type": self._positions[-1].position_type,
-            "position_earning_ratio": self._last_position_earning_ratio,
+            "order_type": self._positions[-1].order.order_type,
+            "position_net_ratio": self._last_position_net_ratio,
         }
