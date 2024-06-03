@@ -225,8 +225,8 @@ class TradingPlatform(gym.Env):
         plt.close(figure)
         return image
 
-    def calc_earning(self, positions: List[Position]) -> Tuple[float, float]:
-        if len(positions) < 2:
+    def calc_earning(self, positions: List[Position], final_time: datetime.datetime) -> Tuple[float, float]:
+        if len(positions) < 1 or positions[-1].time > final_time:
             return (0, 0)
         earning = 0
         # Nets and fees of closed positions (excluding the last position, as it is probably not yet closed)
@@ -238,17 +238,21 @@ class TradingPlatform(gym.Env):
             # Holding fee
             earning += (cur_position.time.date() - prev_position.time.date()).days \
                 * prev_position.amount * -self._position_holding_daily_fee
-            # Position Earning
+            # Position net
             earning += (cur_price / prev_price - 1) * (1 if prev_position.position_type == PositionType.LONG else -1) \
                 * prev_position.amount
             logging.debug("%s %f %s", prev_position.time, prev_price, prev_position.position_type)
-        # Last position plays a closing role and doesn't contribute to the earning
+        # Net and fee of the last position
+        earning += positions[-1].amount * -self._position_opening_fee
+        earning += (final_time.date() - positions[-1].time.date()).days \
+            * self._positions[-1].amount * -self._position_holding_daily_fee
+        earning += positions[-1].amount * self._last_position_net_ratio
         logging.debug(
             "%s %f %s",
             positions[-1].time, self._retrieve_price(positions[-1].time), positions[-1].position_type,
         )
         # Actual price change
-        price_change = (self._retrieve_price(positions[-1].time) - self._retrieve_price(positions[0].time)) \
+        price_change = (self._retrieve_price(final_time) - self._retrieve_price(positions[0].time)) \
             * 1 * positions[0].amount  # Pure price change equals a LONG position, hence `1` instead of `-1`
         return earning, price_change
 
