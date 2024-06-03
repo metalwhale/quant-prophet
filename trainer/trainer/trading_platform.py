@@ -277,8 +277,9 @@ class TradingPlatform(gym.Env):
         self._prices = self._asset.retrieve_historical_prices(self._date, self._historical_days_num)
 
     def _obtain_observation(self) -> Dict[str, Any]:
+        # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
-            "historical_price_deltas": [p.price_delta for p in self._prices],
-            "position_type": self._positions[-1].position_type,
-            "position_net_ratio": self._last_position_net_ratio,
+            "historical_price_deltas": np.array([p.price_delta for p in self._prices]),
+            "position_type": np.array([self._positions[-1].position_type], dtype=int),
+            "position_net_ratio": np.array([self._last_position_net_ratio]),
         }
