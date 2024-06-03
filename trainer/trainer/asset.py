@@ -66,7 +66,7 @@ class Sinusoid(DailyAsset):
         self,
         end_datetime: Union[datetime.date, datetime.datetime], days_num: int,
     ) -> List[Price]:
-        if days_num < 2:
+        if days_num < 1:
             return []
         end_date: datetime.date = end_datetime.date() if type(end_datetime) == datetime.datetime else end_datetime
         start_date = end_date + datetime.timedelta(days=-(days_num - 1))
