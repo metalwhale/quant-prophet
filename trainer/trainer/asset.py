@@ -9,7 +9,7 @@ from .util import OPENING_HOUR, CLOSING_HOUR, find_min_tradable_start_date
 
 class Price:
     _time: datetime.datetime
-    _actual_price: float  # Real price of an asset at a specific time
+    _actual_price: float  # Actual price of an asset at a specific time
     _price_delta: float  # Change in price expressed as a ratio compared to the previous day
 
     def __init__(self, time: datetime, actual_price: float, price_delta: float) -> "Price":

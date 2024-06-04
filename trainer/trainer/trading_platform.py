@@ -83,6 +83,7 @@ class TradingPlatform(gym.Env):
     _asset_pool: List[DailyAsset]
     _historical_days_num: int  # Number of days used for retrieving historical data
     _last_training_date: datetime.date
+    _use_price_as_position_amount: bool
     # TODO: Reconsider the meaning of the opening fee.
     # I believe that changing the opening fee affects how often new positions are opened,
     # i.e., increasing the opening fee means the model may learn to open fewer positions.
@@ -103,26 +104,32 @@ class TradingPlatform(gym.Env):
     _positions: List[Position]  # Keeps adding positions in the same episode, clears them all for a new episode
     _balance: float  # Resets to initial balance after each episode
 
-    # Constants
-    _POSITION_AMOUNT: float = 1  # Equal to or less than the initial balance
-    _INITIAL_BALANCE: float = 1
+    # Constants, mainly used only for training
+    # NOTE: In reality, initial balance should be higher than position amount to cover opening fees.
+    # Here, all set to 1 for simplicity.
+    _POSITION_AMOUNT_UNIT: float = 1  # Equal to or less than the initial balance
+    _INITIAL_BALANCE_UNIT: float = 1
 
     def __init__(
         self,
         asset_pool: List[DailyAsset],
         historical_days_num: int,
         last_training_date: datetime.date,
-        position_opening_fee: float,
-        position_holding_daily_fee: float,
-        max_balance_loss: float,
-        min_positions_num: int = 1,
-        min_steps_num: int = 1,
+        use_price_as_position_amount: bool = False,
+        position_opening_fee: float = 0.0,
+        position_holding_daily_fee: float = 0.0,
+        max_balance_loss: float = 0.0,
+        min_positions_num: int = 0,
+        min_steps_num: int = 0,
     ) -> "TradingPlatform":
         super().__init__()
         # Hyperparameters
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
         self._last_training_date = last_training_date  # TODO: Check if there are enough days to retrieve historical data
+        self._use_price_as_position_amount = use_price_as_position_amount
+        # These following hyperparameters are mainly used only for training,
+        # by calculating reward and determining whether to terminate an episode.
         self._position_opening_fee = position_opening_fee
         self._position_holding_daily_fee = position_holding_daily_fee
         self._max_balance_loss = max_balance_loss
@@ -157,10 +164,10 @@ class TradingPlatform(gym.Env):
         self._date = self._initial_date
         self._retrieve_prices()
         self._positions = [Position(
-            self._prices[-1].time, self._POSITION_AMOUNT,
+            self._prices[-1].time, self._position_amount,
             self.np_random.choice([PositionType.LONG, PositionType.SHORT]),
         )]  # First position
-        self._balance = self._INITIAL_BALANCE \
+        self._balance = self._initial_balance \
             + self._positions[-1].amount * -self._position_opening_fee  # Opening fee
         observation = self._obtain_observation()
         info = {}
@@ -174,14 +181,14 @@ class TradingPlatform(gym.Env):
         if action != int(self._positions[-1].position_type):
             # Previous position's net
             reward += self._positions[-1].amount * self._last_position_net_ratio
-            self._positions.append(Position(self._prices[-1].time, self._POSITION_AMOUNT, PositionType(action)))
+            self._positions.append(Position(self._prices[-1].time, self._position_amount, PositionType(action)))
             reward += self._positions[-1].amount * -self._position_opening_fee  # Opening fee
         # Last position's net
         last_postion_net = self._positions[-1].amount * self._last_position_net_ratio
         # Termination condition
         terminated = (
             # Liquidated
-            self._balance + reward + last_postion_net < self._INITIAL_BALANCE * (1 - self._max_balance_loss)
+            self._balance + reward + last_postion_net < self._initial_balance * (1 - self._max_balance_loss)
             # Normally finished the episode without being forced to quit
             or (
                 len(self._positions) >= self._min_positions_num
@@ -252,7 +259,7 @@ class TradingPlatform(gym.Env):
             positions[-1].time, self._retrieve_price(positions[-1].time), positions[-1].position_type,
         )
         # Actual price change
-        price_change = (self._retrieve_price(final_time) - self._retrieve_price(positions[0].time)) \
+        price_change = (self._retrieve_price(final_time) / self._retrieve_price(positions[0].time) - 1) \
             * 1 * positions[0].amount  # Pure price change equals a LONG position, hence `1` instead of `-1`
         return earning, price_change
 
@@ -265,9 +272,20 @@ class TradingPlatform(gym.Env):
     def _asset(self) -> DailyAsset:
         return self._asset_pool[self._asset_index]
 
+    @property
+    def _position_amount(self) -> float:
+        return self._prices[-1].actual_price if self._use_price_as_position_amount else self._POSITION_AMOUNT_UNIT
+
+    @property
+    def _initial_balance(self) -> float:
+        # NOTE: A zero initial balance may seem illogical, but in testing, only earnings matter, not the initial balance.
+        # The balance is mainly used for training, while using price as a position amount often implies testing.
+        return 0 if self._use_price_as_position_amount else self._INITIAL_BALANCE_UNIT
+
     def _retrieve_price(self, time: datetime.datetime) -> float:
         return self._asset.retrieve_historical_prices(time, 1)[-1].actual_price
 
+    # Should be called right after updating `self._date` to the newest date
     def _retrieve_prices(self):
         # Since `retrieve_historical_prices` chooses the end price from a random time on the same end date,
         # multiple calls produce different results for the end price.
