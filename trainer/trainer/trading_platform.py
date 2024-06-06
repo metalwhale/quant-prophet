@@ -106,6 +106,7 @@ class TradingPlatform(gym.Env):
     # Its sole purpose currently seems to be only preventing holding a position too long, causing a loss before earning.
     # Does it still make sense since we are always holding every day?
     _position_holding_daily_fee: float  # Positive ratio
+    _short_period_penalty: float  # Penalty for holding positions for too short a period
     _max_balance_loss: float  # Positive ratio
     _min_positions_num: int  # Minimum number of positions (greater than 1) allowed in one episode
     _min_steps_num: int  # Minimum number of steps allowed in one episode
@@ -132,6 +133,7 @@ class TradingPlatform(gym.Env):
         use_price_as_position_amount: bool = False,
         position_opening_fee: float = 0.0,
         position_holding_daily_fee: float = 0.0,
+        short_period_penalty: float = 0.0,
         max_balance_loss: float = 0.0,
         min_positions_num: int = 0,
         min_steps_num: int = 0,
@@ -146,6 +148,7 @@ class TradingPlatform(gym.Env):
         # by calculating reward and determining whether to terminate an episode.
         self._position_opening_fee = position_opening_fee
         self._position_holding_daily_fee = position_holding_daily_fee
+        self._short_period_penalty = short_period_penalty
         self._max_balance_loss = max_balance_loss
         self._min_positions_num = min_positions_num
         self._min_steps_num = min_steps_num
@@ -191,6 +194,9 @@ class TradingPlatform(gym.Env):
         reward = self._positions[-1].amount * -self._position_holding_daily_fee  # Holding fee
         # If the position type changes, close the current position and open a new one
         if action != int(self._positions[-1].position_type):
+            # Penalize if the previous position is held for too short a period
+            reward += self._positions[-1].amount \
+                * -self._short_period_penalty / (self._prices[-1].date - self._positions[-1].date).days
             # Previous position's net
             reward += self._positions[-1].amount * self._last_position_net_ratio
             self._positions.append(Position(
@@ -288,13 +294,16 @@ def calc_position_net_ratio(position: Position, actual_price: float) -> float:
 
 def calc_earning(
     positions: List[Position], final_price: DailyPrice,
-    position_opening_fee: float, position_holding_daily_fee: float,
+    position_opening_fee: float, position_holding_daily_fee: float, short_period_penalty: float,
 ) -> Tuple[float, float]:
     if len(positions) < 1 or positions[-1].date > final_price.date:
         return (0, 0)
     earning = 0
     # Nets and fees of closed positions (excluding the last position, as it is probably not yet closed)
     for prev_position, cur_position in zip(positions[:-1], positions[1:]):
+        # TODO: Skip calculating penalties when testing
+        # Short-period penalty
+        earning += prev_position.amount * -short_period_penalty / (cur_position.date - prev_position.date).days
         # Opening fee
         earning += prev_position.amount * -position_opening_fee
         # Holding fee
