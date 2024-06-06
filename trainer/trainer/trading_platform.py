@@ -1,7 +1,7 @@
 import datetime
 import logging
 from enum import IntEnum
-from typing import Any, Dict, List, SupportsFloat, Tuple
+from typing import Any, Dict, List, Optional, SupportsFloat, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -55,6 +55,7 @@ class TradingPlatform(gym.Env):
     metadata = {"render_modes": ["rgb_array"]}
 
     is_training_mode: bool
+    favorite_symbols: Optional[List[str]]
 
     # Terminology
     # "Episode" and "step":
@@ -96,7 +97,7 @@ class TradingPlatform(gym.Env):
     #                          Episode's "first date", randomly chosen within training data's date range
 
     # Hyperparameters
-    _asset_pool: List[DailyAsset]
+    _asset_pool: Dict[str, DailyAsset]
     _historical_days_num: int  # Number of days used for retrieving historical data
     _last_training_date: datetime.date
     _use_price_as_position_amount: bool
@@ -114,7 +115,7 @@ class TradingPlatform(gym.Env):
     _min_steps_num: int  # Minimum number of steps allowed in one episode
 
     # State components
-    _asset_index: int  # Changed only if we reset
+    _asset_symbol: int  # Changed only if we reset
     _date_range: List[datetime.date]  # The random date range of each episode
     _date_index: int  # Grows in the same episode, resets to 0 for a new episode
     _prices: List[DailyPrice]  # Updated whenever the date changes
@@ -129,7 +130,7 @@ class TradingPlatform(gym.Env):
 
     def __init__(
         self,
-        asset_pool: List[DailyAsset],
+        asset_pool: Dict[str, DailyAsset],
         historical_days_num: int,
         last_training_date: datetime.date,
         use_price_as_position_amount: bool = False,
@@ -142,6 +143,7 @@ class TradingPlatform(gym.Env):
     ) -> "TradingPlatform":
         super().__init__()
         self.is_training_mode = True
+        self.favorite_symbols = None
         # Hyperparameters
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
@@ -172,7 +174,17 @@ class TradingPlatform(gym.Env):
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Dict[str, Any], dict[str, Any]]:
         super().reset(seed=seed, options=options)
-        self._asset_index = self.np_random.integers(0, high=len(self._asset_pool))
+        # Choose asset based on favorite symbols
+        asset_pool = self._asset_pool
+        if self.favorite_symbols is not None:
+            asset_pool = {
+                symbol: asset
+                for symbol, asset in self._asset_pool.items()
+                if symbol in self.favorite_symbols
+            }
+            if len(asset_pool) == 0:
+                asset_pool = self._asset_pool
+        self._asset_symbol = list(asset_pool.keys())[self.np_random.integers(0, high=len(asset_pool))]
         if self.is_training_mode:
             # Randomly choose a date within asset's tradable date range
             asset_tradable_date_range = self._asset.find_matched_tradable_date_range(
@@ -262,7 +274,7 @@ class TradingPlatform(gym.Env):
 
     @property
     def _asset(self) -> DailyAsset:
-        return self._asset_pool[self._asset_index]
+        return self._asset_pool[self._asset_symbol]
 
     @property
     def _position_amount(self) -> float:
