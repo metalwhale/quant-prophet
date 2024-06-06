@@ -254,6 +254,7 @@ class TradingPlatform(gym.Env):
             # Because we don't need to calculate the price delta when rendering,
             # it is okay to retrieve the day before `self._historical_days_num`, hence `+ 1`.
             self._date_index + self._historical_days_num + 1,
+            indeterministic=self.is_training_mode,
         )
         axes.plot(
             [p.date for p in prices],
@@ -298,7 +299,10 @@ class TradingPlatform(gym.Env):
         date = self._date_range[self._date_index]
         if len(self._prices) > 0 and self._prices[-1].date == date:
             return
-        self._prices = self._asset.retrieve_historical_prices(date, self._historical_days_num)
+        self._prices = self._asset.retrieve_historical_prices(
+            date, self._historical_days_num,
+            indeterministic=self.is_training_mode,
+        )
 
     def _obtain_observation(self) -> Dict[str, Any]:
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working

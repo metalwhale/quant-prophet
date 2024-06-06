@@ -109,13 +109,20 @@ class DailyAsset(ABC):
 
     # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
     # The actual price used for calculating price delta is usually the close price, except for end date,
-    # where it should be randomly chosen within the range of low price to high price.
-    def retrieve_historical_prices(self, end_date: datetime.date, days_num: int) -> List[DailyPrice]:
+    # where there is an option to be randomly chosen within the range of low price to high price.
+    def retrieve_historical_prices(
+        self, end_date: datetime.date, days_num: int,
+        indeterministic: bool = True,
+    ) -> List[DailyPrice]:
         end_date_index = self.__candle_indices.get(end_date.strftime(self.__DATE_FORMAT))
         # The end date needs to be at least at `days_num` index
         # because we need `days_num` days for historical data (including the end date),
         # plus one day to calculate price delta for the start day.
-        if end_date_index is None or end_date_index < days_num:
+        today = datetime.datetime.now().date()
+        if (
+            end_date_index is None or end_date_index < days_num
+            or self.__candles[end_date_index].date > today
+        ):
             return []
         prices: List[DailyPrice] = []
         # Historical prices for the days before `end_date`
@@ -127,11 +134,14 @@ class DailyAsset(ABC):
             ))
         # Price for `end_date`
         end_date_price = 0
-        if end_date == datetime.datetime.now().date():
+        if end_date == today:
             end_date_price = self._fetch_spot_price()
         else:
-            end_date_price = self.__candles[end_date_index].low \
-                + random.random() * (self.__candles[end_date_index].high - self.__candles[end_date_index].low)
+            if indeterministic:
+                end_date_price = self.__candles[end_date_index].low \
+                    + random.random() * (self.__candles[end_date_index].high - self.__candles[end_date_index].low)
+            else:
+                end_date_price = self.__candles[end_date_index].close
         prices.append(DailyPrice(
             self.__candles[end_date_index].date,
             end_date_price,
