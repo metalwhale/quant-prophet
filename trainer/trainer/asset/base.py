@@ -76,8 +76,11 @@ class DailyAsset(ABC):
         }
 
     # Find the widest date range that matches the following conditions:
-    # - Chosen from the dates of `self.__candles`, skip the first `historical_days_num` dates and maintain the order
+    # - Chosen from the days of `self.__candles`
     # - All dates must be equal to or greater than `min_date`
+    # - Skip the first `historical_days_num` days and maintain the order
+    #   (More precisely, we skip `historical_days_num - 1 + 1` days,
+    #    where `- 1` indicates stopping skipping when we reach the end date, and `+ 1` indicates the day before the start day).
     # - All dates must be equal to or smaller than `max_date`
     def find_matched_tradable_date_range(
         self,
@@ -91,9 +94,13 @@ class DailyAsset(ABC):
         ):
             return []
         date_range: List[datetime.date] = []
-        for candle in self.__candles[historical_days_num:]:
+        historical_days_count = 0
+        for candle in self.__candles:
             date = candle.date
             if min_date is not None and date < min_date:
+                continue
+            historical_days_count += 1
+            if historical_days_count <= historical_days_num:
                 continue
             if max_date is not None and date > max_date:
                 break
@@ -105,7 +112,10 @@ class DailyAsset(ABC):
     # where it should be randomly chosen within the range of low price to high price.
     def retrieve_historical_prices(self, end_date: datetime.date, days_num: int) -> List[DailyPrice]:
         end_date_index = self.__candle_indices.get(end_date.strftime(self.__DATE_FORMAT))
-        if end_date_index is None or end_date_index < days_num - 1:
+        # The end date needs to be at least at `days_num` index
+        # because we need `days_num` days for historical data (including the end date),
+        # plus one day to calculate price delta for the start day.
+        if end_date_index is None or end_date_index < days_num:
             return []
         prices: List[DailyPrice] = []
         # Historical prices for the days before `end_date`
@@ -129,7 +139,7 @@ class DailyAsset(ABC):
         ))
         return prices
 
-    # Returns list of candles in ascending order of date
+    # Returns list of candles in ascending order of day
     @abstractmethod
     def _fetch_candles(self) -> List[DailyCandle]:
         pass

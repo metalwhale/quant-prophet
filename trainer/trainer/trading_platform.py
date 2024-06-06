@@ -54,6 +54,8 @@ class Position:
 class TradingPlatform(gym.Env):
     metadata = {"render_modes": ["rgb_array"]}
 
+    is_training_mode: bool
+
     # Terminology
     # "Episode" and "step":
     # - "Episode" and "step" are terms usually used in reinforcement learning.
@@ -63,8 +65,8 @@ class TradingPlatform(gym.Env):
     # - A "date" refers to a "tradable day of the date type", i.e., a day on which we can open an position.
     #   We use "date" as the end date of a date range when retrieving historical data.
     #   Note that, unless otherwise explained, we consider a "date" to have this meaning.
-    # - An example of a date that is not a "date" according to our definition is the "published date" of an asset,
-    #   and all dates before the "first date" of an episode (see the `reset` method for details),
+    # - An example of a day that is not a "date" according to our definition is the "published day" of an asset,
+    #   and all days before the "first date" of an episode (see the `reset` method for details),
     #   because they are not used as the end date when retrieving historical data or for opening positions,
     #   but rather as serial data used for training the model.
     #
@@ -72,16 +74,16 @@ class TradingPlatform(gym.Env):
     #   (Note: `~~~~~~~~*` depicts length of `_historical_days_num`,
     #    with `*` being the date used as the end date when retrieving the historical data)
     #
-    #   Asset's "published date"
+    #   Asset's "published day"
     #   |
     #   |       |<---------------------------------------- Asset's tradable date range ---------------------------------------->|
-    #   |       |<------------------------ Training data ------------------------>|<------------- Validation data ------------->|
+    #   |       |<------------------------ Training data ------------------------>|<------------- Evaluation data ------------->|
     #   |       |                                                                 |                                             |
     #   ~~~~~~~~|=================================================================|=============================================| Now
     #   |       |                                                                 |
     #   |                                                                         Last training date (`_last_training_date`)
     #   |
-    #   |<----->| The first `historical_days_num` dates are non-tradable and will be skipped
+    #   |<----->| The first `historical_days_num` days are non-tradable and will be skipped
     #
     #                          |<------------- Episode's date range ------------->|
     #                          |==================================================|
@@ -139,6 +141,7 @@ class TradingPlatform(gym.Env):
         min_steps_num: int = 0,
     ) -> "TradingPlatform":
         super().__init__()
+        self.is_training_mode = True
         # Hyperparameters
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
@@ -170,13 +173,19 @@ class TradingPlatform(gym.Env):
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Dict[str, Any], dict[str, Any]]:
         super().reset(seed=seed, options=options)
         self._asset_index = self.np_random.integers(0, high=len(self._asset_pool))
-        # Randomly choose a date within asset's tradable date range
-        asset_tradable_date_range = self._asset.find_matched_tradable_date_range(
-            self._historical_days_num,
-            max_date=self._last_training_date,
-        )
-        # Date range need to have at least two dates, one for the reset and one for a single step
-        self._date_range = asset_tradable_date_range[self.np_random.integers(len(asset_tradable_date_range) - 1):]
+        if self.is_training_mode:
+            # Randomly choose a date within asset's tradable date range
+            asset_tradable_date_range = self._asset.find_matched_tradable_date_range(
+                self._historical_days_num,
+                max_date=self._last_training_date,
+            )
+            # Date range need to have at least two dates, one for the reset and one for a single step
+            self._date_range = asset_tradable_date_range[self.np_random.integers(len(asset_tradable_date_range) - 1):]
+        else:
+            self._date_range = self._asset.find_matched_tradable_date_range(
+                self._historical_days_num,
+                min_date=self._last_training_date,
+            )
         self._date_index = 0
         self._retrieve_prices()
         self._positions = [Position(
@@ -261,8 +270,8 @@ class TradingPlatform(gym.Env):
 
     @property
     def _initial_balance(self) -> float:
-        # NOTE: A zero initial balance may seem illogical, but in testing, only earnings matter, not the initial balance.
-        # The balance is mainly used for training, while using price as a position amount often implies testing.
+        # NOTE: A zero initial balance may seem illogical, but in evaluation, only earnings matter, not the initial balance.
+        # The balance is mainly used for training, while using price as a position amount often implies evaluation.
         return 0 if self._use_price_as_position_amount else self._INITIAL_BALANCE_UNIT
 
     @property
@@ -301,7 +310,7 @@ def calc_earning(
     earning = 0
     # Nets and fees of closed positions (excluding the last position, as it is probably not yet closed)
     for prev_position, cur_position in zip(positions[:-1], positions[1:]):
-        # TODO: Skip calculating penalties when testing
+        # TODO: Skip calculating penalties when evaluating
         # Short-period penalty
         earning += prev_position.amount * -short_period_penalty / (cur_position.date - prev_position.date).days
         # Opening fee
