@@ -66,15 +66,6 @@ class DailyAsset(ABC):
 
     __DATE_FORMAT = "%Y-%m-%d"
 
-    # Remember to call this method in the inheritance class to fetch candles
-    def initialize(self):
-        self.__candles = self._fetch_candles()
-        self.__candles.sort(key=lambda candle: candle.date)  # Sort the list just in case
-        self.__candle_indices = {
-            c.date.strftime(self.__DATE_FORMAT): i
-            for i, c in enumerate(self.__candles)
-        }
-
     # Find the widest date range that matches the following conditions:
     # - Chosen from the days of `self.__candles`
     # - All dates must be equal to or greater than `min_date`
@@ -148,6 +139,15 @@ class DailyAsset(ABC):
             (end_date_price / self.__candles[end_date_index - 1].close - 1)
         ))
         return prices
+
+    # Remember to call this method in the inheritance class to fetch candles
+    def _initialize(self):
+        self.__candles = self._fetch_candles()
+        self.__candles.sort(key=lambda candle: candle.date)  # Sort the list just in case
+        self.__candle_indices = {
+            c.date.strftime(self.__DATE_FORMAT): i
+            for i, c in enumerate(self.__candles)
+        }
 
     # Returns list of candles in ascending order of day
     @abstractmethod

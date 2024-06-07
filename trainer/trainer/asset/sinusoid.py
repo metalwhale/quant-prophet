@@ -20,7 +20,7 @@ class Sinusoid(DailyAsset):
     ) -> "Sinusoid":
         self._published_time = published_time
         self._get_price = lambda time: self._sine(time, self._published_time, alpha, beta, gamma1, gamma2)
-        self.initialize()  # For fetching candles
+        self._initialize()  # For fetching candles
 
     # sin(α*x+γ1)*β+γ2
     @staticmethod
@@ -63,7 +63,7 @@ class ComposedSinusoid(Sinusoid):
         for _ in range(components_num):
             components.append(self._generate_sine(alpha_range, beta_range, gamma1_range, gamma2_range))
         self._get_price = lambda time: sum([c(time) for c in components])
-        self.initialize()  # For fetching candles
+        self._initialize()  # For fetching candles
 
     def _generate_sine(
         self,
