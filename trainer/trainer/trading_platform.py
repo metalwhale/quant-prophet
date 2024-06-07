@@ -100,7 +100,6 @@ class TradingPlatform(gym.Env):
     _asset_pool: Dict[str, DailyAsset]
     _historical_days_num: int  # Number of days used for retrieving historical data
     _last_training_date: datetime.date
-    _use_price_as_position_amount: bool
     # TODO: Reconsider the meaning of the opening fee.
     # I believe that changing the opening fee affects how often new positions are opened,
     # i.e., increasing the opening fee means the model may learn to open fewer positions.
@@ -108,8 +107,8 @@ class TradingPlatform(gym.Env):
     # TODO: Reconsider the meaning of the daily fee.
     # Its sole purpose currently seems to be only preventing holding a position too long, causing a loss before earning.
     # Does it still make sense since we are always holding every day?
-    _position_holding_daily_fee: float  # Positive ratio
-    _short_period_penalty: float  # Penalty for holding positions for too short a period
+    _position_holding_daily_fee: float = 0.0  # Positive ratio (UNUSED)
+    _short_period_penalty: float = 0.0  # Penalty for holding positions for too short a period (UNUSED)
     _max_balance_loss: float  # Positive ratio
     _min_positions_num: int  # Minimum number of positions (greater than 1) allowed in one episode
     _min_steps_num: int  # Minimum number of steps allowed in one episode
@@ -133,10 +132,7 @@ class TradingPlatform(gym.Env):
         asset_pool: Dict[str, DailyAsset],
         historical_days_num: int,
         last_training_date: datetime.date,
-        use_price_as_position_amount: bool = False,
         position_opening_fee: float = 0.0,
-        position_holding_daily_fee: float = 0.0,
-        short_period_penalty: float = 0.0,
         max_balance_loss: float = 0.0,
         min_positions_num: int = 0,
         min_steps_num: int = 0,
@@ -148,12 +144,9 @@ class TradingPlatform(gym.Env):
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
         self._last_training_date = last_training_date  # TODO: Check if there are enough days to retrieve historical data
-        self._use_price_as_position_amount = use_price_as_position_amount
         # These following hyperparameters are mainly used only for training,
         # by calculating reward and determining whether to terminate an episode.
         self._position_opening_fee = position_opening_fee
-        self._position_holding_daily_fee = position_holding_daily_fee
-        self._short_period_penalty = short_period_penalty
         self._max_balance_loss = max_balance_loss
         self._min_positions_num = min_positions_num
         self._min_steps_num = min_steps_num
@@ -247,7 +240,8 @@ class TradingPlatform(gym.Env):
     def render(self) -> Any | List[Any] | None:
         if self.render_mode != "rgb_array":
             return
-        figure = plt.figure(dpi=200)
+        figure = plt.figure(figsize=(10, 6), dpi=200)
+        figure.subplots_adjust(left=0.05, bottom=0.05, right=1, top=1)
         axes = figure.add_subplot(111)
         prices = self._asset.retrieve_historical_prices(
             self._date_range[self._date_index],
@@ -279,13 +273,13 @@ class TradingPlatform(gym.Env):
 
     @property
     def _position_amount(self) -> float:
-        return self._prices[-1].actual_price if self._use_price_as_position_amount else self._POSITION_AMOUNT_UNIT
+        return self._POSITION_AMOUNT_UNIT if self.is_training_mode else self._prices[-1].actual_price
 
     @property
     def _initial_balance(self) -> float:
         # NOTE: A zero initial balance may seem illogical, but in evaluation, only earnings matter, not the initial balance.
         # The balance is mainly used for training, while using price as a position amount often implies evaluation.
-        return 0 if self._use_price_as_position_amount else self._INITIAL_BALANCE_UNIT
+        return self._INITIAL_BALANCE_UNIT if self.is_training_mode else 0
 
     @property
     def _last_position_net_ratio(self):
@@ -319,7 +313,7 @@ def calc_position_net_ratio(position: Position, actual_price: float) -> float:
 
 def calc_earning(
     positions: List[Position], final_price: DailyPrice,
-    position_opening_fee: float, position_holding_daily_fee: float, short_period_penalty: float,
+    position_opening_fee: float = 0.0, position_holding_daily_fee: float = 0.0, short_period_penalty: float = 0.0,
 ) -> Tuple[float, float]:
     if len(positions) < 1 or positions[-1].date > final_price.date:
         return (0, 0)
