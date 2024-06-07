@@ -115,7 +115,7 @@ class TradingPlatform(gym.Env):
     _min_steps_num: int  # Minimum number of steps allowed in one episode
 
     # State components
-    _asset_symbol: int  # Changed only if we reset
+    _asset_symbol: str  # Changed only if we reset
     _date_range: List[datetime.date]  # The random date range of each episode
     _date_index: int  # Grows in the same episode, resets to 0 for a new episode
     _prices: List[DailyPrice]  # Updated whenever the date changes
@@ -247,7 +247,7 @@ class TradingPlatform(gym.Env):
     def render(self) -> Any | List[Any] | None:
         if self.render_mode != "rgb_array":
             return
-        figure = plt.figure()
+        figure = plt.figure(dpi=200)
         axes = figure.add_subplot(111)
         prices = self._asset.retrieve_historical_prices(
             self._date_range[self._date_index],
