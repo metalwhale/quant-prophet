@@ -158,11 +158,6 @@ class TradingPlatform(gym.Env):
             # Suppose that price deltas (ratio) are greater than -1 and less than 1,
             # meaning price never drops to 0 and never doubles from previous day.
             "historical_price_deltas": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
-            # Position types have the same values as action space.
-            "position_type": gym.spaces.Discrete(len(PositionType)),
-            # Similar to price deltas, suppose that position net ratio is in range (-1, 1) compared to entry price.
-            # TODO: Consider cases when position net ratio can be greater than 1.
-            "position_net_ratio": gym.spaces.Box(-1, 1, shape=(1,)),
         })
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Dict[str, Any], dict[str, Any]]:
@@ -203,34 +198,34 @@ class TradingPlatform(gym.Env):
         return observation, info
 
     def step(self, action: np.int64) -> tuple[Dict[str, Any], SupportsFloat, bool, bool, dict[str, Any]]:
+        reward = 0
+        # Recalculate position's net by first reverting net of the previous date.
+        # The net of the current date will be calculated later.
+        reward -= self._positions[-1].amount * self._last_position_net_ratio
+        # Move to a new date (the current date)
         self._date_index += 1
         self._retrieve_prices()
-        reward = self._positions[-1].amount * -self._position_holding_daily_fee  # Holding fee
+        reward += self._positions[-1].amount * -self._position_holding_daily_fee  # Holding fee
+        reward += self._positions[-1].amount * self._last_position_net_ratio  # Position's net of the current date
         # If the position type changes, close the current position and open a new one
         if action != int(self._positions[-1].position_type):
             # Penalize if the previous position is held for too short a period
             reward += self._positions[-1].amount \
                 * -self._short_period_penalty / (self._prices[-1].date - self._positions[-1].date).days
-            # Previous position's net
-            reward += self._positions[-1].amount * self._last_position_net_ratio
             self._positions.append(Position(
                 self._prices[-1].date, PositionType(action),
                 self._prices[-1].actual_price, self._position_amount,
             ))
             reward += self._positions[-1].amount * -self._position_opening_fee  # Opening fee
-        # Last position's net
-        last_postion_net = self._positions[-1].amount * self._last_position_net_ratio
         # Termination condition
         terminated = (
             # Liquidated
-            self._balance + reward + last_postion_net < self._initial_balance * (1 - self._max_balance_loss)
+            self._balance + reward < self._initial_balance * (1 - self._max_balance_loss)
             # Normally finished the episode without being forced to quit
             or (len(self._positions) >= self._min_positions_num and self._date_index > self._min_steps_num)
         )
         # Truncation condition
         truncated = self._date_index >= len(self._date_range) - 1
-        if terminated or truncated:
-            reward += last_postion_net
         # Treat the balance as a cumulative reward in each episode
         self._balance += reward
         observation = self._obtain_observation()
@@ -302,8 +297,6 @@ class TradingPlatform(gym.Env):
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_price_deltas": np.array([p.price_delta for p in self._prices]),
-            "position_type": np.array([self._positions[-1].position_type], dtype=int),
-            "position_net_ratio": np.array([self._last_position_net_ratio]),
         }
 
 
