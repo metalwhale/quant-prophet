@@ -61,10 +61,14 @@ class DailyPrice:
 
 
 class DailyAsset(ABC):
+    __symbol: str
     __candles: List[DailyCandle]
     __candle_indices: Dict[str, int]
 
     __DATE_FORMAT = "%Y-%m-%d"
+
+    def __init__(self, symbol: str) -> "DailyAsset":
+        self.__symbol = symbol
 
     # Find the widest date range that matches the following conditions:
     # - Chosen from the days of `self.__candles`
@@ -105,7 +109,7 @@ class DailyAsset(ABC):
         self, end_date: datetime.date, days_num: int,
         indeterministic: bool = True,
     ) -> List[DailyPrice]:
-        end_date_index = self.__candle_indices.get(end_date.strftime(self.__DATE_FORMAT))
+        end_date_index = self._get_date_index(end_date)
         # The end date needs to be at least at `days_num` index
         # because we need `days_num` days for historical data (including the end date),
         # plus one day to calculate price delta for the start day.
@@ -140,6 +144,14 @@ class DailyAsset(ABC):
         ))
         return prices
 
+    def retrieve_price_delta(self, date: datetime.date) -> float:
+        date_index = self._get_date_index(date)
+        return (self.__candles[date_index].close / self.__candles[date_index - 1].close - 1)
+
+    @property
+    def symbol(self) -> str:
+        return self.__symbol
+
     # Remember to call this method in the inheritance class to fetch candles
     def _initialize(self):
         self.__candles = self._fetch_candles()
@@ -148,6 +160,9 @@ class DailyAsset(ABC):
             c.date.strftime(self.__DATE_FORMAT): i
             for i, c in enumerate(self.__candles)
         }
+
+    def _get_date_index(self, date: datetime.date) -> int:
+        return self.__candle_indices.get(date.strftime(self.__DATE_FORMAT))
 
     # Returns list of candles in ascending order of day
     @abstractmethod

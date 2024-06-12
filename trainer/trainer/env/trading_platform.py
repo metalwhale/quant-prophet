@@ -1,14 +1,15 @@
 import datetime
 import logging
 from enum import IntEnum
-from typing import Any, Dict, List, Optional, SupportsFloat, Tuple
+from typing import Any, Dict, List, SupportsFloat, Tuple
 
 import gymnasium as gym
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib import markers
 
-from .asset.base import DailyAsset, DailyPrice
+from ..asset.base import DailyAsset, DailyPrice
+from .asset_pool import AssetPool
 
 
 class PositionType(IntEnum):
@@ -55,7 +56,6 @@ class TradingPlatform(gym.Env):
     metadata = {"render_modes": ["rgb_array"]}
 
     is_training_mode: bool
-    favorite_symbols: Optional[List[str]]
 
     # Terminology
     # "Episode" and "step":
@@ -97,7 +97,7 @@ class TradingPlatform(gym.Env):
     #                          Episode's "first date", randomly chosen within training data's date range
 
     # Hyperparameters
-    _asset_pool: Dict[str, DailyAsset]
+    _asset_pool: AssetPool
     _historical_days_num: int  # Number of days used for retrieving historical data
     _last_training_date: datetime.date
     # TODO: Reconsider the meaning of the opening fee.
@@ -129,7 +129,7 @@ class TradingPlatform(gym.Env):
 
     def __init__(
         self,
-        asset_pool: Dict[str, DailyAsset],
+        asset_pool: AssetPool,
         historical_days_num: int,
         last_training_date: datetime.date,
         position_opening_fee: float = 0.0,
@@ -139,7 +139,6 @@ class TradingPlatform(gym.Env):
     ) -> "TradingPlatform":
         super().__init__()
         self.is_training_mode = True
-        self.favorite_symbols = None
         # Hyperparameters
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
@@ -162,30 +161,12 @@ class TradingPlatform(gym.Env):
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Dict[str, Any], dict[str, Any]]:
         super().reset(seed=seed, options=options)
-        # Choose asset based on favorite symbols
-        asset_pool = self._asset_pool
-        if self.favorite_symbols is not None:
-            asset_pool = {
-                symbol: asset
-                for symbol, asset in self._asset_pool.items()
-                if symbol in self.favorite_symbols
-            }
-            if len(asset_pool) == 0:
-                asset_pool = self._asset_pool
-        self._asset_symbol = list(asset_pool.keys())[self.np_random.integers(0, high=len(asset_pool))]
-        if self.is_training_mode:
-            # Randomly choose a date within asset's tradable date range
-            asset_tradable_date_range = self._asset.find_matched_tradable_date_range(
-                self._historical_days_num,
-                max_date=self._last_training_date,
-            )
-            # Date range need to have at least two dates, one for the reset and one for a single step
-            self._date_range = asset_tradable_date_range[self.np_random.integers(len(asset_tradable_date_range) - 1):]
-        else:
-            self._date_range = self._asset.find_matched_tradable_date_range(
-                self._historical_days_num,
-                min_date=self._last_training_date,
-            )
+        self._asset_symbol, self._date_range = self._asset_pool.choose_asset(
+            self._historical_days_num,
+            min_date=self._last_training_date if not self.is_training_mode else None,
+            max_date=self._last_training_date if self.is_training_mode else None,
+            random_start_day=self.is_training_mode,
+        )
         self._date_index = 0
         self._retrieve_prices()
         self._positions = [Position(
@@ -222,7 +203,7 @@ class TradingPlatform(gym.Env):
             # Liquidated
             self._balance + reward < self._initial_balance * (1 - self._max_balance_loss)
             # Normally finished the episode without being forced to quit
-            or (len(self._positions) >= self._min_positions_num and self._date_index > self._min_steps_num)
+            or (len(self._positions) >= self._min_positions_num and self._date_index >= self._min_steps_num)
         )
         # Truncation condition
         truncated = self._date_index >= len(self._date_range) - 1
@@ -263,7 +244,7 @@ class TradingPlatform(gym.Env):
 
     @property
     def _asset(self) -> DailyAsset:
-        return self._asset_pool[self._asset_symbol]
+        return self._asset_pool.get_asset(self._asset_symbol)
 
     @property
     def _position_amount(self) -> float:
