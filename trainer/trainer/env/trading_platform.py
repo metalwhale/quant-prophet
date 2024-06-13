@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 from matplotlib import markers
 
 from ..asset.base import DailyAsset, DailyPrice
-from .asset_pool import AssetPool
+from .asset_pool import AssetPool, calc_polarity_diff
 
 
 class PositionType(IntEnum):
@@ -55,7 +55,7 @@ class Position:
 class TradingPlatform(gym.Env):
     metadata = {"render_modes": ["rgb_array"]}
 
-    is_training_mode: bool
+    _is_training_mode: bool
 
     # Terminology
     # "Episode" and "step":
@@ -118,6 +118,7 @@ class TradingPlatform(gym.Env):
     _date_range: List[datetime.date]  # The random date range of each episode
     _date_index: int  # Grows in the same episode, resets to 0 for a new episode
     _prices: List[DailyPrice]  # Updated whenever the date changes
+    _polarity_diff: int
     _positions: List[Position]  # Keeps adding positions in the same episode, clears them all for a new episode
     _balance: float  # Resets to initial balance after each episode
 
@@ -138,7 +139,6 @@ class TradingPlatform(gym.Env):
         min_steps_num: int = 0,
     ) -> None:
         super().__init__()
-        self.is_training_mode = True
         # Hyperparameters
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
@@ -151,6 +151,7 @@ class TradingPlatform(gym.Env):
         self._min_steps_num = min_steps_num
         # State components
         self._prices = []
+        self._polarity_diff = 0
         # Environment
         self.action_space = gym.spaces.Discrete(len(PositionType))
         self.observation_space = gym.spaces.Dict({
@@ -158,14 +159,16 @@ class TradingPlatform(gym.Env):
             # meaning price never drops to 0 and never doubles from previous day.
             "historical_price_deltas": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
         })
+        # Mode
+        self.is_training_mode = True
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Dict[str, Any], dict[str, Any]]:
+    def reset(
+        self, *,
+        seed: int | None = None, options: dict[str, Any] | None = None,
+    ) -> tuple[Dict[str, Any], dict[str, Any]]:
         super().reset(seed=seed, options=options)
-        self._asset_symbol, self._date_range = self._asset_pool.choose_asset(
-            self._historical_days_num,
-            min_date=self._last_training_date if not self.is_training_mode else None,
-            max_date=self._last_training_date if self.is_training_mode else None,
-            random_start_day=self.is_training_mode,
+        self._asset_symbol, self._date_range = self._asset_pool.choose_asset_date(
+            random_start_day=self.is_training_mode, target_polarity_diff=-self._polarity_diff,
         )
         self._date_index = 0
         self._retrieve_prices()
@@ -243,6 +246,20 @@ class TradingPlatform(gym.Env):
         return image
 
     @property
+    def is_training_mode(self) -> bool:
+        return self._is_training_mode
+
+    @is_training_mode.setter
+    def is_training_mode(self, is_training_mode: bool):
+        self._is_training_mode = is_training_mode
+        self._asset_pool.apply_date_range_matcher(
+            self._min_steps_num,
+            self._historical_days_num,
+            min_date=self._last_training_date if not self.is_training_mode else None,
+            max_date=self._last_training_date if self.is_training_mode else None,
+        )
+
+    @property
     def _asset(self) -> DailyAsset:
         return self._asset_pool.get_asset(self._asset_symbol)
 
@@ -272,6 +289,7 @@ class TradingPlatform(gym.Env):
             date, self._historical_days_num,
             indeterministic=self.is_training_mode,
         )
+        self._polarity_diff += calc_polarity_diff(self._prices[-1].price_delta)
 
     def _obtain_observation(self) -> Dict[str, Any]:
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working

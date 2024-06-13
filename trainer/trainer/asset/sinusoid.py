@@ -1,7 +1,8 @@
 import datetime
 import math
-import random
 from typing import Callable, List, Tuple
+
+import numpy as np
 
 from .base import DailyAsset, DailyCandle
 
@@ -74,8 +75,8 @@ class ComposedSinusoid(Sinusoid):
         alpha_range: Tuple[float, float], beta_range: Tuple[float, float],
         gamma1_range: Tuple[float, float], gamma2_range: Tuple[float, float],
     ) -> Callable[[datetime.datetime], float]:
-        alpha = alpha_range[0] + random.random() * (alpha_range[1] - alpha_range[0])
-        beta = beta_range[0] + random.random() * (beta_range[1] - beta_range[0])
-        gamma1 = gamma1_range[0] + random.random() * (gamma1_range[1] - gamma1_range[0])
-        gamma2 = gamma2_range[0] + random.random() * (gamma2_range[1] - gamma2_range[0])
+        alpha = alpha_range[0] + np.random.random() * (alpha_range[1] - alpha_range[0])
+        beta = beta_range[0] + np.random.random() * (beta_range[1] - beta_range[0])
+        gamma1 = gamma1_range[0] + np.random.random() * (gamma1_range[1] - gamma1_range[0])
+        gamma2 = gamma2_range[0] + np.random.random() * (gamma2_range[1] - gamma2_range[0])
         return lambda time: self._sine(time, self._published_time, alpha, beta, gamma1, gamma2)
