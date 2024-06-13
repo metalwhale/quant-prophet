@@ -1,7 +1,8 @@
 import datetime
-import random
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
+
+import numpy as np
 
 
 class DailyCandle:
@@ -134,7 +135,7 @@ class DailyAsset(ABC):
         else:
             if indeterministic:
                 end_date_price = self.__candles[end_date_index].low \
-                    + random.random() * (self.__candles[end_date_index].high - self.__candles[end_date_index].low)
+                    + np.random.random() * (self.__candles[end_date_index].high - self.__candles[end_date_index].low)
             else:
                 end_date_price = self.__candles[end_date_index].close
         prices.append(DailyPrice(
