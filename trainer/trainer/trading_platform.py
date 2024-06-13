@@ -240,9 +240,8 @@ class TradingPlatform(gym.Env):
         axes = figure.add_subplot(111)
         prices = self._asset.retrieve_historical_prices(
             self._date_range[self._date_index],
-            # Because we don't need to calculate the price delta when rendering,
-            # it is okay to retrieve the day before `self._historical_days_num`, hence `+ 1`.
-            self._date_index + self._historical_days_num + 1,
+            # Retrieve all the days before the current date in the date range
+            self._date_index + self._historical_days_num,
             indeterministic=self.is_training_mode,
         )
         axes.plot(
