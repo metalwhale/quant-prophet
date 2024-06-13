@@ -14,7 +14,7 @@ class DailyCandle:
         self,
         date: datetime.date,
         high: float, low: float, close: float,
-    ) -> "DailyCandle":
+    ) -> None:
         self._date = date
         self._high = high
         self._low = low
@@ -42,7 +42,7 @@ class DailyPrice:
     _actual_price: float  # Close price or a random value between low price and high price
     _price_delta: float  # Change in price expressed as a ratio compared to the previous day
 
-    def __init__(self, date: datetime.date, actual_price: float, price_delta: float) -> "DailyPrice":
+    def __init__(self, date: datetime.date, actual_price: float, price_delta: float) -> None:
         self._date = date
         self._actual_price = actual_price
         self._price_delta = price_delta
@@ -67,7 +67,7 @@ class DailyAsset(ABC):
 
     __DATE_FORMAT = "%Y-%m-%d"
 
-    def __init__(self, symbol: str) -> "DailyAsset":
+    def __init__(self, symbol: str) -> None:
         self.__symbol = symbol
 
     # Find the widest date range that matches the following conditions:

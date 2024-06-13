@@ -26,7 +26,7 @@ class Position:
     def __init__(
         self,
         date: datetime.date, position_type: PositionType, entry_price: float, amount: float,
-    ) -> "Position":
+    ) -> None:
         self._date = date
         self._position_type = position_type
         self._entry_price = entry_price
@@ -136,7 +136,7 @@ class TradingPlatform(gym.Env):
         max_balance_loss: float = 0.0,
         min_positions_num: int = 0,
         min_steps_num: int = 0,
-    ) -> "TradingPlatform":
+    ) -> None:
         super().__init__()
         self.is_training_mode = True
         # Hyperparameters

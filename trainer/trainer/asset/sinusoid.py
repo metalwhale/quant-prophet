@@ -18,7 +18,7 @@ class Sinusoid(DailyAsset):
         symbol: str,
         published_time: datetime.datetime,
         alpha: float = math.pi, beta: float = 1.0, gamma1: float = 0.0, gamma2: float = 0.0,
-    ) -> "Sinusoid":
+    ) -> None:
         DailyAsset.__init__(self, symbol)
         self._published_time = published_time
         self._get_price = lambda time: self._sine(time, self._published_time, alpha, beta, gamma1, gamma2)
@@ -60,7 +60,7 @@ class ComposedSinusoid(Sinusoid):
         components_num: int,
         alpha_range: Tuple[float, float], beta_range: Tuple[float, float],
         gamma1_range: Tuple[float, float], gamma2_range: Tuple[float, float],
-    ) -> "ComposedSinusoid":
+    ) -> None:
         DailyAsset.__init__(self, symbol)
         self._published_time = published_time
         components = []
