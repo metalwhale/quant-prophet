@@ -154,10 +154,20 @@ class TradingPlatform(gym.Env):
         self._polarity_diff = 0
         # Environment
         self.action_space = gym.spaces.Discrete(len(PositionType))
+        # NOTE: Theoretically, we only need the historical price when deciding the position order (buy/sell or hold).
+        # However, with DQN (or perhaps many other RL algorithms),
+        # to inform the agent about how long the episode has elapsed and how long it takes to finish the episode,
+        # knowing "where" the current state is relatively located in an episode is critically required.
+        # In my best guess, this can be solved by adding information about the position we are holding.
         self.observation_space = gym.spaces.Dict({
             # Suppose that price deltas (ratio) are greater than -1 and less than 1,
             # meaning price never drops to 0 and never doubles from previous day.
             "historical_price_deltas": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            # Position types have the same values as action space.
+            "position_type": gym.spaces.Discrete(len(PositionType)),
+            # Similar to price deltas, suppose that position net ratio is in range (-1, 1) compared to entry price.
+            # TODO: Consider cases when position net ratio can be greater than 1.
+            "position_net_ratio": gym.spaces.Box(-1, 1, shape=(1,)),
         })
         # Mode
         self.is_training_mode = True
@@ -295,6 +305,8 @@ class TradingPlatform(gym.Env):
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_price_deltas": np.array([p.price_delta for p in self._prices]),
+            "position_type": np.array([self._positions[-1].position_type], dtype=int),
+            "position_net_ratio": np.array([self._last_position_net_ratio]),
         }
 
 
