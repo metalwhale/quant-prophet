@@ -234,10 +234,10 @@ class TradingPlatform(gym.Env):
     def render(self) -> Any | List[Any] | None:
         if self.render_mode != "rgb_array":
             return
-        figure = plt.figure(figsize=(10, 6), dpi=200)
-        figure.subplots_adjust(left=0.05, bottom=0.05, right=1, top=1)
+        figure = plt.figure(figsize=(10, 6 if self.is_training_mode else 3), dpi=200)
+        figure.subplots_adjust(left=0.05, bottom=0.1, right=1, top=1)
         # Plot prices and positions
-        axes = figure.add_subplot(211)
+        axes = figure.add_subplot(211 if self.is_training_mode else 111)
         prices = self._asset.retrieve_historical_prices(
             self._date_range[self._date_index],
             # Retrieve all the days before the current date in the date range
@@ -253,9 +253,10 @@ class TradingPlatform(gym.Env):
                 marker=markers.CARETUP if is_long else markers.CARETDOWN,
                 color="green" if is_long else "red",
             )
-        # Plot date counter
-        axes = figure.add_subplot(212)
-        axes.bar(dates, [sum(self._date_chosen_counter[d].values()) for d in dates])
+        if self.is_training_mode:
+            # Plot date counter
+            axes = figure.add_subplot(212)
+            axes.bar(dates, [sum(self._date_chosen_counter[d].values()) for d in dates])
         # Draw figure
         figure.canvas.draw()
         image = np.frombuffer(figure.canvas.tostring_rgb(), dtype=np.uint8) \
