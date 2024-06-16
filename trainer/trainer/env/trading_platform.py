@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional, SupportsFloat, Tuple
 import gymnasium as gym
 import numpy as np
 from matplotlib import pyplot as plt
-from matplotlib import markers
 
 from ..asset.base import DailyAsset, DailyPrice
 from .asset_pool import AssetPool, calc_polarity_diff
@@ -240,7 +239,7 @@ class TradingPlatform(gym.Env):
         if self.render_mode != "rgb_array":
             return
         figure = plt.figure(figsize=(10, 6 if self.is_training_mode else 3), dpi=200)
-        figure.subplots_adjust(left=0.05, bottom=0.1, right=1, top=1)
+        figure.subplots_adjust(left=0.05, bottom=0.1, right=1, top=0.95)
         # Plot prices and positions
         axes = figure.add_subplot(211 if self.is_training_mode else 111)
         prices = self._asset.retrieve_historical_prices(
@@ -250,13 +249,12 @@ class TradingPlatform(gym.Env):
             indeterministic=self.is_training_mode,
         )
         dates = [p.date for p in prices]
-        axes.plot(dates, [p.actual_price for p in prices])
+        axes.plot(dates, [p.actual_price for p in prices], color="gray", linewidth=1)
         for position in self._positions:
             is_long = position.position_type == PositionType.LONG
             axes.plot(
                 position.date, position.entry_price,
-                marker=markers.CARETUP if is_long else markers.CARETDOWN,
-                color="green" if is_long else "red",
+                color="green" if is_long else "red", marker="o", markersize=1,
             )
         if self.is_training_mode:
             # Plot date counter
