@@ -111,8 +111,8 @@ class TradingPlatform(gym.Env):
     _position_holding_daily_fee: float = 0.0  # Positive ratio (UNUSED)
     _short_period_penalty: float = 0.0  # Penalty for holding positions for too short a period (UNUSED)
     _max_balance_loss: float  # Positive ratio
-    _min_positions_num: int  # Minimum number of positions (greater than 1) allowed in one episode
-    _min_steps_num: int  # Minimum number of steps allowed in one episode
+    _max_positions_num: int  # Maximum number of positions (greater than 1) allowed in one episode
+    _max_steps_num: int  # Maximum number of steps allowed in one episode
 
     # State components
     # Platform-level, only changed if we refresh
@@ -139,8 +139,8 @@ class TradingPlatform(gym.Env):
         historical_days_num: int,
         position_opening_fee: float = 0.0,
         max_balance_loss: float = 0.0,
-        min_positions_num: int = 0,
-        min_steps_num: int = 0,
+        max_positions_num: int = 0,
+        max_steps_num: int = 0,
     ) -> None:
         super().__init__()
         # Hyperparameters
@@ -150,8 +150,8 @@ class TradingPlatform(gym.Env):
         # by calculating reward and determining whether to terminate an episode.
         self._position_opening_fee = position_opening_fee
         self._max_balance_loss = max_balance_loss
-        self._min_positions_num = min_positions_num
-        self._min_steps_num = min_steps_num
+        self._max_positions_num = max_positions_num
+        self._max_steps_num = max_steps_num
         # Environment
         self.action_space = gym.spaces.Discrete(len(PositionType))
         # NOTE: Theoretically, we only need the historical price when deciding the position order (buy/sell or hold).
@@ -218,15 +218,20 @@ class TradingPlatform(gym.Env):
         terminated = (
             # Liquidated
             self._balance + reward < self._initial_balance * (1 - self._max_balance_loss)
-            # Normally finished the episode without being forced to quit
-            or (len(self._positions) >= self._min_positions_num and self._date_index >= self._min_steps_num)
         )
         # Truncation condition
-        truncated = self._date_index >= len(self._date_range) - 1
+        is_end_of_date = self._date_index >= len(self._date_range) - 1
+        truncated = (
+            is_end_of_date
+            or len(self._positions) >= self._max_positions_num
+            or self._date_index >= self._max_steps_num
+        )
         # Treat the balance as a cumulative reward in each episode
         self._balance += reward
         observation = self._obtain_observation()
-        info = {}
+        info = {
+            "is_end_of_date": is_end_of_date,
+        }
         if self.is_training_mode:
             self._polarity_diff += calc_polarity_diff(self._prices[-1].price_delta)
         return observation, reward, terminated, truncated, info
@@ -266,7 +271,7 @@ class TradingPlatform(gym.Env):
 
     def apply_date_range(self, min_date: Optional[datetime.date] = None, max_date: Optional[datetime.date] = None):
         self._asset_pool.apply_date_range_matcher(
-            self._min_steps_num, self._historical_days_num,
+            self._max_steps_num, self._historical_days_num,
             min_date=min_date, max_date=max_date,
         )
 
