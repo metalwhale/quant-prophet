@@ -216,13 +216,15 @@ class TradingPlatform(gym.Env):
                 self._prices[-1].actual_price, self._position_amount,
             ))
             reward += self._positions[-1].amount * -self._position_opening_fee  # Opening fee
+        # Treat the balance as a cumulative reward in each episode
+        self._balance += reward
         # Read more about termination and truncation at:
         # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/handling_time_limits/
         # - https://farama.org/Gymnasium-Terminated-Truncated-Step-API
         # Termination condition
         terminated = (
             # Liquidated
-            self._balance + reward < self._initial_balance * (1 - self._max_balance_loss)
+            self._balance < self._initial_balance * (1 - self._max_balance_loss)
         )
         # Truncation condition
         is_end_of_date = self._date_index >= len(self._date_range) - 1
@@ -231,8 +233,7 @@ class TradingPlatform(gym.Env):
             or len(self._positions) >= self._max_positions_num
             or self._date_index >= self._max_steps_num
         )
-        # Treat the balance as a cumulative reward in each episode
-        self._balance += reward
+        # Observation and additional info
         observation = self._obtain_observation()
         info = {
             "is_end_of_date": is_end_of_date,
