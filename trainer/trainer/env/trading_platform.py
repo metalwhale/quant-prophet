@@ -129,8 +129,8 @@ class TradingPlatform(gym.Env):
     # Constants, mainly used only for training
     # NOTE: In reality, initial balance should be higher than position amount to cover opening fees.
     # Here, all set to 1 for simplicity.
-    _POSITION_AMOUNT_UNIT: float = 1  # Equal to or less than the initial balance
-    _INITIAL_BALANCE_UNIT: float = 1
+    _POSITION_AMOUNT_UNIT: float = 1.0  # Equal to or less than the initial balance
+    _INITIAL_BALANCE_UNIT: float = 1.0
 
     def __init__(
         self,
@@ -157,16 +157,19 @@ class TradingPlatform(gym.Env):
         # However, with DQN (or perhaps many other RL algorithms),
         # to inform the agent about how long the episode has elapsed and how long it takes to finish the episode,
         # knowing "where" the current state is relatively located in an episode is critically required.
-        # In my best guess, this can be solved by adding information about the position we are holding.
+        # In my best guess, this can be solved by adding information about current balance or the position we are holding.
         self.observation_space = gym.spaces.Dict({
             # Suppose that price deltas (ratio) are greater than -1 and less than 1,
             # meaning price never drops to 0 and never doubles from previous day.
             "historical_price_deltas": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             # Position types have the same values as action space.
             "position_type": gym.spaces.Discrete(len(PositionType)),
-            # Similar to price deltas, suppose that position net ratio is in range (-1, 1) compared to entry price.
-            # TODO: Consider cases when position net ratio can be greater than 1.
-            "position_net_ratio": gym.spaces.Box(-1, 1, shape=(1,)),
+            # # Similar to price deltas, suppose that position net ratio is in range (-1, 1) compared to entry price.
+            # # TODO: Consider cases when position net ratio can be greater than 1.
+            # "position_net_ratio": gym.spaces.Box(-1, 1, shape=(1,)),
+            # Regardless of whether the environment is in trading mode or not, always retrieve the balance in "units",
+            # in other words, consider the initial balance and position amounts as based on `1`.
+            "balance": gym.spaces.Box(0, 2, shape=(1,)),
         })
         # Refresh platform-level state components
         self.refresh()
@@ -213,6 +216,9 @@ class TradingPlatform(gym.Env):
                 self._prices[-1].actual_price, self._position_amount,
             ))
             reward += self._positions[-1].amount * -self._position_opening_fee  # Opening fee
+        # Read more about termination and truncation at:
+        # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/handling_time_limits/
+        # - https://farama.org/Gymnasium-Terminated-Truncated-Step-API
         # Termination condition
         terminated = (
             # Liquidated
@@ -292,7 +298,7 @@ class TradingPlatform(gym.Env):
         return self._INITIAL_BALANCE_UNIT if self.is_training_mode else 0
 
     @property
-    def _last_position_net_ratio(self):
+    def _last_position_net_ratio(self) -> float:
         return calc_position_net_ratio(self._positions[-1], self._prices[-1].actual_price)
 
     # Should be called right after updating `self._date_index` to the newest date
@@ -309,11 +315,19 @@ class TradingPlatform(gym.Env):
         )
 
     def _obtain_observation(self) -> Dict[str, Any]:
+        balance = 0
+        if self.is_training_mode:
+            balance = self._balance
+        else:
+            # Ignore previous positions and only consider the current one, that means when not in training mode,
+            # we always treat the current position as the first position of an episode.
+            balance = self._INITIAL_BALANCE_UNIT + self._POSITION_AMOUNT_UNIT * self._last_position_net_ratio
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_price_deltas": np.array([p.price_delta for p in self._prices]),
             "position_type": np.array([self._positions[-1].position_type], dtype=int),
-            "position_net_ratio": np.array([self._last_position_net_ratio]),
+            # "position_net_ratio": np.array([self._last_position_net_ratio]),
+            "balance": np.array([balance]),
         }
 
 
