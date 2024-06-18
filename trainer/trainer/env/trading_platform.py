@@ -185,6 +185,7 @@ class TradingPlatform(gym.Env):
         self._asset_symbol, self._date_range = self._asset_pool.choose_asset_date(
             random_start_day=self.is_training_mode, target_polarity_diff=-self._polarity_diff,
         )
+        self._asset.prepare_candles(random_close=self.is_training_mode)
         self._date_index = 0
         self._retrieve_prices()
         self._positions = [Position(
@@ -258,7 +259,7 @@ class TradingPlatform(gym.Env):
             self._date_range[self._date_index],
             # Retrieve all the days before the current date in the date range
             self._date_index + self._historical_days_num,
-            indeterministic=self.is_training_mode,
+            random_end=self.is_training_mode,
         )
         dates = [p.date for p in prices]
         axes.plot(dates, [p.actual_price for p in prices], color="gray", linewidth=1)
@@ -317,7 +318,7 @@ class TradingPlatform(gym.Env):
             return
         self._prices = self._asset.retrieve_historical_prices(
             date, self._historical_days_num,
-            indeterministic=self.is_training_mode,
+            random_end=self.is_training_mode,
         )
 
     def _obtain_observation(self) -> Dict[str, Any]:
