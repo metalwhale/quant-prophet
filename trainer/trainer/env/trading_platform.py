@@ -110,6 +110,7 @@ class TradingPlatform(gym.Env):
     _position_holding_daily_fee: float = 0.0  # Positive ratio (UNUSED)
     _short_period_penalty: float = 0.0  # Penalty for holding positions for too short a period (UNUSED)
     _max_balance_loss: float  # Positive ratio
+    _max_balance_gain: float  # Positive ratio
     _max_positions_num: int  # Maximum number of positions (greater than 1) allowed in one episode
     _max_steps_num: int  # Maximum number of steps allowed in one episode
 
@@ -138,6 +139,7 @@ class TradingPlatform(gym.Env):
         historical_days_num: int,
         position_opening_fee: float = 0.0,
         max_balance_loss: float = 0.0,
+        max_balance_gain: float = 0.0,
         max_positions_num: int = 0,
         max_steps_num: int = 0,
     ) -> None:
@@ -149,6 +151,7 @@ class TradingPlatform(gym.Env):
         # by calculating reward and determining whether to terminate an episode.
         self._position_opening_fee = position_opening_fee
         self._max_balance_loss = max_balance_loss
+        self._max_balance_gain = max_balance_gain
         self._max_positions_num = max_positions_num
         self._max_steps_num = max_steps_num
         # Environment
@@ -167,7 +170,7 @@ class TradingPlatform(gym.Env):
             # # Similar to price deltas, suppose that position net ratio is in range (-1, 1) compared to entry price.
             # # TODO: Consider cases when position net ratio can be greater than 1.
             # "position_net_ratio": gym.spaces.Box(-1, 1, shape=(1,)),
-            # Regardless of whether the environment is in trading mode or not, always retrieve the balance in "units",
+            # Regardless of whether the environment is in trading mode or not, always obtain the balance in "units",
             # in other words, consider the initial balance and position amounts as based on `1`.
             "balance": gym.spaces.Box(0, 2, shape=(1,)),
         })
@@ -225,6 +228,8 @@ class TradingPlatform(gym.Env):
         terminated = (
             # Liquidated
             self._balance < self._initial_balance * (1 - self._max_balance_loss)
+            # Realizing profits
+            or self._balance >= self._initial_balance * (1 + self._max_balance_gain)
         )
         # Truncation condition
         is_end_of_date = self._date_index >= len(self._date_range) - 1
@@ -322,7 +327,8 @@ class TradingPlatform(gym.Env):
         else:
             # Ignore previous positions and only consider the current one, that means when not in training mode,
             # we always treat the current position as the first position of an episode.
-            balance = self._INITIAL_BALANCE_UNIT + self._POSITION_AMOUNT_UNIT * self._last_position_net_ratio
+            balance = self._INITIAL_BALANCE_UNIT + self._POSITION_AMOUNT_UNIT \
+                * (-self._position_opening_fee + self._last_position_net_ratio)
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_price_deltas": np.array([p.price_delta for p in self._prices]),
