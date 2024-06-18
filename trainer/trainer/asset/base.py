@@ -63,8 +63,9 @@ class DailyPrice:
 
 class DailyAsset(ABC):
     __symbol: str
+    __org_candles: List[DailyCandle]
     __candles: List[DailyCandle]
-    __candle_indices: Dict[str, int]
+    __date_indices: Dict[str, int]
 
     __DATE_FORMAT = "%Y-%m-%d"
 
@@ -86,12 +87,12 @@ class DailyAsset(ABC):
         if (
             (min_date is not None and max_date is not None and min_date > max_date)
             # We need at least `historical_days_num` plus 1 because price delta requires one previous day to calculate
-            or len(self.__candles) < historical_days_num + 1
+            or len(self.__org_candles) < historical_days_num + 1
         ):
             return []
         date_range: List[datetime.date] = []
         historical_days_count = 0
-        for candle in self.__candles:
+        for candle in self.__org_candles:
             date = candle.date
             if min_date is not None and date < min_date:
                 continue
@@ -103,21 +104,36 @@ class DailyAsset(ABC):
             date_range.append(date)
         return date_range
 
+    # TODO: Use `self.__candles` instead of `self.__org_candles` when retrieving price deltas
+    def retrieve_price_delta(self, date: datetime.date) -> float:
+        date_index = self._get_date_index(date)
+        return (self.__org_candles[date_index].close / self.__org_candles[date_index - 1].close - 1)
+
+    def prepare_candles(self, random_close: bool = False):
+        self.__candles = [
+            DailyCandle(
+                c.date, c.high, c.low,
+                c.low + np.random.random() * (c.high - c.low) if random_close else c.close,
+            )
+            for c in self.__org_candles
+        ]
+
     # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
     # The actual price used for calculating price delta is usually the close price, except for end date,
     # where there is an option to be randomly chosen within the range of low price to high price.
     def retrieve_historical_prices(
         self, end_date: datetime.date, days_num: int,
-        indeterministic: bool = True,
+        random_end: bool = True,
     ) -> List[DailyPrice]:
         end_date_index = self._get_date_index(end_date)
         # The end date needs to be at least at `days_num` index
         # because we need `days_num` days for historical data (including the end date),
         # plus one day to calculate price delta for the start day.
         today = datetime.datetime.now().date()
+        end_candle = self.__candles[end_date_index]
         if (
             end_date_index is None or end_date_index < days_num
-            or self.__candles[end_date_index].date > today
+            or end_candle.date > today
         ):
             return []
         prices: List[DailyPrice] = []
@@ -133,21 +149,16 @@ class DailyAsset(ABC):
         if end_date == today:
             end_date_price = self._fetch_spot_price()
         else:
-            if indeterministic:
-                end_date_price = self.__candles[end_date_index].low \
-                    + np.random.random() * (self.__candles[end_date_index].high - self.__candles[end_date_index].low)
+            if random_end:
+                end_date_price = end_candle.low + np.random.random() * (end_candle.high - end_candle.low)
             else:
-                end_date_price = self.__candles[end_date_index].close
+                end_date_price = end_candle.close
         prices.append(DailyPrice(
-            self.__candles[end_date_index].date,
+            end_candle.date,
             end_date_price,
-            (end_date_price / self.__candles[end_date_index - 1].close - 1)
+            end_date_price / self.__candles[end_date_index - 1].close - 1,
         ))
         return prices
-
-    def retrieve_price_delta(self, date: datetime.date) -> float:
-        date_index = self._get_date_index(date)
-        return (self.__candles[date_index].close / self.__candles[date_index - 1].close - 1)
 
     @property
     def symbol(self) -> str:
@@ -155,15 +166,15 @@ class DailyAsset(ABC):
 
     # Remember to call this method in the inheritance class to fetch candles
     def _initialize(self):
-        self.__candles = self._fetch_candles()
-        self.__candles.sort(key=lambda candle: candle.date)  # Sort the list just in case
-        self.__candle_indices = {
+        self.__org_candles = self._fetch_candles()
+        self.__org_candles.sort(key=lambda candle: candle.date)  # Sort the list just in case
+        self.__date_indices = {
             c.date.strftime(self.__DATE_FORMAT): i
-            for i, c in enumerate(self.__candles)
+            for i, c in enumerate(self.__org_candles)
         }
 
     def _get_date_index(self, date: datetime.date) -> int:
-        return self.__candle_indices.get(date.strftime(self.__DATE_FORMAT))
+        return self.__date_indices.get(date.strftime(self.__DATE_FORMAT))
 
     # Returns list of candles in ascending order of day
     @abstractmethod
