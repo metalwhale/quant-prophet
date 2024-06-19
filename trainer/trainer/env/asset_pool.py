@@ -49,12 +49,12 @@ class AssetPool:
     favorite_symbols: Optional[List[str]]
 
     _asset_date_ranges: Dict[str, AssetDateRange]
-    _diff_norm_base: float
+    _polarity_temperature: float
 
-    def __init__(self, assets: List[DailyAsset], diff_norm_base: float = 1.0) -> None:
+    def __init__(self, assets: List[DailyAsset], polarity_temperature: float = 1.0) -> None:
         self.favorite_symbols = None
         self._asset_date_ranges = {a.symbol: AssetDateRange(a) for a in assets}
-        self._diff_norm_base = diff_norm_base
+        self._polarity_temperature = polarity_temperature
 
     def apply_date_range_matcher(
         self,
@@ -101,7 +101,7 @@ class AssetPool:
                 distance_weights = [distances.index(d) + 1 for d in polarity_distances]
                 start_date_index = np.random.choice(
                     range(len(distance_weights)),
-                    p=_norm_prob(distance_weights, self._diff_norm_base),
+                    p=_norm_prob(distance_weights, self._polarity_temperature),
                 )
             date_range = date_range[start_date_index:]
         return symbol, date_range
@@ -139,7 +139,7 @@ def _map_date_range_to_date_polarity(
     return asset_polarities
 
 
-def _norm_prob(array: List, base: float) -> List:
-    exp = [math.exp(base * e) for e in array]
+def _norm_prob(array: List, temperature: float) -> List:
+    exp = [math.exp(e / temperature) for e in array]
     exp_sum = sum(exp)
     return [e / exp_sum for e in exp]
