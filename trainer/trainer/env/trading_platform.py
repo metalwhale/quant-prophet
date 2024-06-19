@@ -167,9 +167,9 @@ class TradingPlatform(gym.Env):
             "historical_price_deltas": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             # Position types have the same values as action space.
             "position_type": gym.spaces.Discrete(len(PositionType)),
-            # # Similar to price deltas, suppose that position net ratio is in range (-1, 1) compared to entry price.
-            # # TODO: Consider cases when position net ratio can be greater than 1.
-            # "position_net_ratio": gym.spaces.Box(-1, 1, shape=(1,)),
+            # Similar to price deltas, suppose that position net ratio is in range (-1, 1) compared to entry price.
+            # TODO: Consider cases when position net ratio can be greater than 1.
+            "position_net_ratio": gym.spaces.Box(-1, 1, shape=(1,)),
             # Regardless of whether the environment is in trading mode or not, always obtain the balance in "units",
             # in other words, consider the initial balance and position amounts as based on `1`.
             "balance": gym.spaces.Box(0, 2, shape=(1,)),
@@ -322,6 +322,9 @@ class TradingPlatform(gym.Env):
         )
 
     def _obtain_observation(self) -> Dict[str, Any]:
+        deltas = [p.price_delta for p in self._prices]
+        max_delta = max([abs(d) for d in deltas])
+        deltas = [d / max_delta for d in deltas]
         balance = 0
         if self.is_training_mode:
             balance = self._balance
@@ -332,9 +335,9 @@ class TradingPlatform(gym.Env):
                 * (-self._position_opening_fee + self._last_position_net_ratio)
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
-            "historical_price_deltas": np.array([p.price_delta for p in self._prices]),
+            "historical_price_deltas": np.array(deltas),
             "position_type": np.array([self._positions[-1].position_type], dtype=int),
-            # "position_net_ratio": np.array([self._last_position_net_ratio]),
+            "position_net_ratio": np.array([self._last_position_net_ratio]),
             "balance": np.array([balance]),
         }
 
