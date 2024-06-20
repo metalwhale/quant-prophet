@@ -140,7 +140,8 @@ class DailyAsset(ABC):
             return []
         prices: List[DailyPrice] = []
         # Historical prices for the days before `end_date`
-        for i in range(end_date_index - (days_num - 1), end_date_index):
+        start_date_index = end_date_index - (days_num - 1)
+        for i in range(start_date_index, end_date_index):
             prices.append(DailyPrice(
                 self.__candles[i].date,
                 self.__candles[i].close,
