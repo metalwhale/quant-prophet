@@ -61,6 +61,7 @@ class AssetPool:
         ahead_days_num: int,
         historical_days_num: int,
         min_date: Optional[datetime.date] = None, max_date: Optional[datetime.date] = None,
+        exclude_historical: bool = True,
     ):
         for asset_date_range in self._asset_date_ranges.values():
             asset = asset_date_range.asset
@@ -68,6 +69,7 @@ class AssetPool:
             date_range = asset.find_matched_tradable_date_range(
                 historical_days_num,
                 min_date=min_date, max_date=max_date,
+                exclude_historical=exclude_historical,
             )
             asset_date_range.date_polarities = _map_date_range_to_date_polarity(asset, date_range, ahead_days_num)
 
