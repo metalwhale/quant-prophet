@@ -83,6 +83,7 @@ class DailyAsset(ABC):
         self,
         historical_days_num: int,
         min_date: Optional[datetime.date] = None, max_date: Optional[datetime.date] = None,
+        exclude_historical: bool = True,
     ) -> List[datetime.date]:
         if (
             (min_date is not None and max_date is not None and min_date > max_date)
@@ -97,7 +98,7 @@ class DailyAsset(ABC):
             if min_date is not None and date < min_date:
                 continue
             historical_days_count += 1
-            if historical_days_count <= historical_days_num:
+            if exclude_historical and historical_days_count <= historical_days_num:
                 continue
             if max_date is not None and date > max_date:
                 break

@@ -251,10 +251,10 @@ class TradingPlatform(gym.Env):
     def render(self) -> Any | List[Any] | None:
         if self.render_mode != "rgb_array":
             return
-        figure = plt.figure(figsize=(10, 6 if self.is_training_mode else 3), dpi=200)
+        figure = plt.figure(figsize=(10, 9 if self.is_training_mode else 6), dpi=200)
         figure.subplots_adjust(left=0.05, bottom=0.1, right=1, top=0.95)
         # Plot prices and positions
-        axes = figure.add_subplot(211 if self.is_training_mode else 111)
+        axes = figure.add_subplot(311 if self.is_training_mode else 211)
         prices = self._asset.retrieve_historical_prices(
             self._date_range[self._date_index],
             # Retrieve all the days before the current date in the date range
@@ -262,16 +262,26 @@ class TradingPlatform(gym.Env):
             random_end=self.is_training_mode,
         )
         dates = [p.date for p in prices]
-        axes.plot(dates, [p.actual_price for p in prices], color="gray", linewidth=1)
+        axes.plot(dates, [p.actual_price for p in prices], color="gray", linewidth=0.5)
         for position in self._positions:
             is_long = position.position_type == PositionType.LONG
             axes.plot(
                 position.date, position.entry_price,
-                color="green" if is_long else "red", marker="o", markersize=1,
+                color="green" if is_long else "red", marker="o", markersize=0.5,
             )
+        # Plot price deltas
+        axes = figure.add_subplot(312 if self.is_training_mode else 212)
+        price_deltas = self._norm_deltas([p.price_delta for p in prices])
+        axes.plot(dates, price_deltas, color="gray", linewidth=0.5)
+        for position in self._positions:
+            is_long = position.position_type == PositionType.LONG
+            axes.plot(
+                position.date, price_deltas[dates.index(position.date)],
+                color="green" if is_long else "red", marker="o", markersize=0.5,
+            )
+        # Plot date counter
         if self.is_training_mode:
-            # Plot date counter
-            axes = figure.add_subplot(212)
+            axes = figure.add_subplot(313)
             axes.bar(dates, [sum(self._date_chosen_counter[d].values()) for d in dates])
         # Draw figure
         figure.canvas.draw()
@@ -280,10 +290,15 @@ class TradingPlatform(gym.Env):
         plt.close(figure)
         return image
 
-    def apply_date_range(self, min_date: Optional[datetime.date] = None, max_date: Optional[datetime.date] = None):
+    def apply_date_range(
+        self,
+        min_date: Optional[datetime.date] = None, max_date: Optional[datetime.date] = None,
+        exclude_historical: bool = True,
+    ):
         self._asset_pool.apply_date_range_matcher(
             self._max_steps_num, self._historical_days_num,
             min_date=min_date, max_date=max_date,
+            exclude_historical=exclude_historical,
         )
 
     def refresh(self):
@@ -322,9 +337,6 @@ class TradingPlatform(gym.Env):
         )
 
     def _obtain_observation(self) -> Dict[str, Any]:
-        deltas = [p.price_delta for p in self._prices]
-        max_delta = max([abs(d) for d in deltas])
-        deltas = [d / max_delta for d in deltas]
         balance = 0
         if self.is_training_mode:
             balance = self._balance
@@ -335,11 +347,17 @@ class TradingPlatform(gym.Env):
                 * (-self._position_opening_fee + self._last_position_net_ratio)
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
-            "historical_price_deltas": np.array(deltas),
+            "historical_price_deltas": np.array(self._norm_deltas([p.price_delta for p in self._prices])),
             "position_type": np.array([self._positions[-1].position_type], dtype=int),
             "position_net_ratio": np.array([self._last_position_net_ratio]),
             "balance": np.array([balance]),
         }
+
+    @staticmethod
+    def _norm_deltas(deltas: List[float]) -> List[float]:
+        max_delta = max([abs(d) for d in deltas])
+        deltas = [d / max_delta for d in deltas]
+        return deltas
 
 
 def calc_position_net_ratio(position: Position, actual_price: float) -> float:
