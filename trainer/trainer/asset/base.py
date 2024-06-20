@@ -68,6 +68,7 @@ class DailyAsset(ABC):
     __date_indices: Dict[str, int]
 
     __DATE_FORMAT = "%Y-%m-%d"
+    __DELTA_DISTANCE = 1
 
     def __init__(self, symbol: str) -> None:
         self.__symbol = symbol
@@ -75,9 +76,7 @@ class DailyAsset(ABC):
     # Find the widest date range that matches the following conditions:
     # - Chosen from the days of `self.__candles`
     # - All dates must be equal to or greater than `min_date`
-    # - Skip the first `historical_days_num` days and maintain the order
-    #   (More precisely, we skip `historical_days_num - 1 + 1` days,
-    #    where `- 1` indicates stopping skipping when we reach the end date, and `+ 1` indicates the day before the start day).
+    # - Skip the first few days which are reserved for calculating historical data
     # - All dates must be equal to or smaller than `max_date`
     def find_matched_tradable_date_range(
         self,
@@ -87,18 +86,21 @@ class DailyAsset(ABC):
     ) -> List[datetime.date]:
         if (
             (min_date is not None and max_date is not None and min_date > max_date)
-            # We need at least `historical_days_num` plus 1 because price delta requires one previous day to calculate
-            or len(self.__org_candles) < historical_days_num + 1
+            # Price delta requires `self.__DELTA_DISTANCE` days to calculate
+            or len(self.__org_candles) < historical_days_num + self.__DELTA_DISTANCE
         ):
             return []
         date_range: List[datetime.date] = []
-        historical_days_count = 0
+        # `extra` means that in order to calculate anything (other than the actual price),
+        # which requires data from previous days, we also count the days even before the first historical days.
+        extra_historical_days_count = 0
         for candle in self.__org_candles:
             date = candle.date
             if min_date is not None and date < min_date:
                 continue
-            historical_days_count += 1
-            if exclude_historical and historical_days_count <= historical_days_num:
+            extra_historical_days_count += 1
+            # Stop skipping when we reach the last day of historical days
+            if exclude_historical and extra_historical_days_count < historical_days_num + self.__DELTA_DISTANCE:
                 continue
             if max_date is not None and date > max_date:
                 break
@@ -108,7 +110,7 @@ class DailyAsset(ABC):
     # TODO: Use `self.__candles` instead of `self.__org_candles` when retrieving price deltas
     def retrieve_price_delta(self, date: datetime.date) -> float:
         date_index = self._get_date_index(date)
-        return (self.__org_candles[date_index].close / self.__org_candles[date_index - 1].close - 1)
+        return self.__org_candles[date_index].close / self.__org_candles[date_index - self.__DELTA_DISTANCE].close - 1
 
     def prepare_candles(self, random_close: bool = False):
         self.__candles = [
@@ -127,13 +129,12 @@ class DailyAsset(ABC):
         random_end: bool = True,
     ) -> List[DailyPrice]:
         end_date_index = self._get_date_index(end_date)
-        # The end date needs to be at least at `days_num` index
-        # because we need `days_num` days for historical data (including the end date),
-        # plus one day to calculate price delta for the start day.
         today = datetime.datetime.now().date()
         end_candle = self.__candles[end_date_index]
         if (
-            end_date_index is None or end_date_index < days_num
+            # We need `days_num` days for historical data (including the end date),
+            # plus `self.__DELTA_DISTANCE` to calculate price delta for the start day.
+            end_date_index is None or end_date_index < days_num + self.__DELTA_DISTANCE - 1
             or end_candle.date > today
         ):
             return []
@@ -143,7 +144,7 @@ class DailyAsset(ABC):
             prices.append(DailyPrice(
                 self.__candles[i].date,
                 self.__candles[i].close,
-                self.__candles[i].close / self.__candles[i - 1].close - 1,
+                self.__candles[i].close / self.__candles[i - self.__DELTA_DISTANCE].close - 1,
             ))
         # Price for `end_date`
         end_date_price = 0
@@ -157,7 +158,7 @@ class DailyAsset(ABC):
         prices.append(DailyPrice(
             end_candle.date,
             end_date_price,
-            end_date_price / self.__candles[end_date_index - 1].close - 1,
+            end_date_price / self.__candles[end_date_index - self.__DELTA_DISTANCE].close - 1,
         ))
         return prices
 
