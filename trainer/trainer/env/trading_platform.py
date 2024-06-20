@@ -251,10 +251,10 @@ class TradingPlatform(gym.Env):
     def render(self) -> Any | List[Any] | None:
         if self.render_mode != "rgb_array":
             return
-        figure = plt.figure(figsize=(10, 9 if self.is_training_mode else 6), dpi=200)
+        figure = plt.figure(figsize=(10, 6 if self.is_training_mode else 3), dpi=800)
         figure.subplots_adjust(left=0.05, bottom=0.1, right=1, top=0.95)
         # Plot prices and positions
-        axes = figure.add_subplot(311 if self.is_training_mode else 211)
+        axes = figure.add_subplot(211 if self.is_training_mode else 111)
         prices = self._asset.retrieve_historical_prices(
             self._date_range[self._date_index],
             # Retrieve all the days before the current date in the date range
@@ -269,19 +269,9 @@ class TradingPlatform(gym.Env):
                 position.date, position.entry_price,
                 color="green" if is_long else "red", marker="o", markersize=0.5,
             )
-        # Plot price deltas
-        axes = figure.add_subplot(312 if self.is_training_mode else 212)
-        price_deltas = self._norm_deltas([p.price_delta for p in prices])
-        axes.plot(dates, price_deltas, color="gray", linewidth=0.5)
-        for position in self._positions:
-            is_long = position.position_type == PositionType.LONG
-            axes.plot(
-                position.date, price_deltas[dates.index(position.date)],
-                color="green" if is_long else "red", marker="o", markersize=0.5,
-            )
         # Plot date counter
         if self.is_training_mode:
-            axes = figure.add_subplot(313)
+            axes = figure.add_subplot(212)
             axes.bar(dates, [sum(self._date_chosen_counter[d].values()) for d in dates])
         # Draw figure
         figure.canvas.draw()
@@ -355,6 +345,7 @@ class TradingPlatform(gym.Env):
 
     @staticmethod
     def _norm_deltas(deltas: List[float]) -> List[float]:
+        # TODO: Is it ok to use instance normalization?
         max_delta = max([abs(d) for d in deltas])
         deltas = [d / max_delta for d in deltas]
         return deltas
