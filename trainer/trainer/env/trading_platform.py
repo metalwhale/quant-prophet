@@ -162,9 +162,10 @@ class TradingPlatform(gym.Env):
         # knowing "where" the current state is relatively located in an episode is critically required.
         # In my best guess, this can be solved by adding information about current balance or the position we are holding.
         self.observation_space = gym.spaces.Dict({
-            # Suppose that price deltas (ratio) are greater than -1 and less than 1,
-            # meaning price never drops to 0 and never doubles from previous day.
+            # Suppose that delta values (ratios) are greater than -1 and less than 1,
+            # meaning prices and other indicators never drop to 0 and never double from previous day.
             "historical_price_deltas": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            "historical_ema_deltas": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             # Position types have the same values as action space.
             "position_type": gym.spaces.Discrete(len(PositionType)),
             # Similar to price deltas, suppose that position net ratio is in range (-1, 1) compared to entry price.
@@ -185,7 +186,7 @@ class TradingPlatform(gym.Env):
         self._asset_symbol, self._date_range = self._asset_pool.choose_asset_date(
             random_start_day=self.is_training_mode, target_polarity_diff=-self._polarity_diff,
         )
-        self._asset.prepare_candles(random_close=self.is_training_mode)
+        self._asset.prepare_indicators(random_close=self.is_training_mode)
         self._date_index = 0
         self._retrieve_prices()
         self._positions = [Position(
@@ -338,6 +339,7 @@ class TradingPlatform(gym.Env):
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_price_deltas": np.array(self._norm_deltas([p.price_delta for p in self._prices])),
+            "historical_ema_deltas": np.array(self._norm_deltas([p.ema_delta for p in self._prices])),
             "position_type": np.array([self._positions[-1].position_type], dtype=int),
             "position_net_ratio": np.array([self._last_position_net_ratio]),
             "balance": np.array([balance]),
