@@ -7,12 +7,13 @@ import numpy as np
 from .base import DailyAsset, DailyCandle
 
 
+OPENING_HOUR: int = 8
+CLOSING_HOUR: int = 16
+
+
 class Sinusoid(DailyAsset):
     _published_time: datetime.datetime
     _get_price: Callable[[datetime.datetime], float]
-
-    _OPENING_HOUR: int = 8
-    _CLOSING_HOUR: int = 16
 
     def __init__(
         self,
@@ -37,13 +38,13 @@ class Sinusoid(DailyAsset):
 
     def _fetch_candles(self) -> List[DailyCandle]:
         date = self._published_time.date()
-        if self._published_time.hour >= self._CLOSING_HOUR:
+        if self._published_time.hour >= CLOSING_HOUR:
             date += datetime.timedelta(days=1)
         candles: List[DailyCandle] = []
         while date <= datetime.datetime.now().date():
             hourly_prices: float = [
                 self._get_price(datetime.datetime.combine(date, datetime.time(hour)))
-                for hour in range(self._OPENING_HOUR, self._CLOSING_HOUR + 1)
+                for hour in range(OPENING_HOUR, CLOSING_HOUR + 1)
             ]
             candles.append(DailyCandle(date, max(hourly_prices), min(hourly_prices), hourly_prices[-1]))
             date += datetime.timedelta(days=1)
@@ -75,8 +76,8 @@ class ComposedSinusoid(Sinusoid):
         alpha_range: Tuple[float, float], beta_range: Tuple[float, float],
         gamma1_range: Tuple[float, float], gamma2_range: Tuple[float, float],
     ) -> Callable[[datetime.datetime], float]:
-        alpha = alpha_range[0] + np.random.random() * (alpha_range[1] - alpha_range[0])
-        beta = beta_range[0] + np.random.random() * (beta_range[1] - beta_range[0])
-        gamma1 = gamma1_range[0] + np.random.random() * (gamma1_range[1] - gamma1_range[0])
-        gamma2 = gamma2_range[0] + np.random.random() * (gamma2_range[1] - gamma2_range[0])
+        alpha = np.random.uniform(*alpha_range)
+        beta = np.random.uniform(*beta_range)
+        gamma1 = np.random.uniform(*gamma1_range)
+        gamma2 = np.random.uniform(*gamma2_range)
         return lambda time: self._sine(time, self._published_time, alpha, beta, gamma1, gamma2)
