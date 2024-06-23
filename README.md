@@ -20,7 +20,7 @@ Quantitative strategy using magic based on faith and luck
     ```
 2. Run the command:
     ```bash
-    python scripts/data_collector/yahoo/collector.py download_data --source_dir /usr/src/quant-prophet/data/stock/us --start 1900-01-01 --end 2024-12-31 --delay 1 --interval 1d --region US
+    python scripts/data_collector/yahoo/collector.py download_data --source_dir /usr/src/quant-prophet/data/input/stock/us --start 1900-01-01 --end 2024-12-31 --delay 1 --interval 1d --region US
     ```
 
 ### Train the agent
