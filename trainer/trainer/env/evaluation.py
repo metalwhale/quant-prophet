@@ -1,8 +1,12 @@
+import csv
 import logging
-from typing import Any, Optional, Tuple
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 
@@ -10,20 +14,41 @@ from .trading_platform import PositionType, TradingPlatform, calc_earning
 
 
 class FullEvalCallback(BaseCallback):
-    _eval_freq: int
-    _val_env: TradingPlatform
-    _test_env: Optional[TradingPlatform]
+    _output_path: Path
+    _envs: Dict[str, TradingPlatform]
+    _freq: int
+    _render: bool
+
     _ep_count: int
+    _log_field_names: List[str]
+    _log_records: List[Dict[str, Any]]
+
+    _LOG_FILE_NAME = "log.csv"
+    _CHART_FILE_NAME = "chart.png"
 
     def __init__(
         self,
-        eval_freq: int, val_env: TradingPlatform, test_env: Optional[TradingPlatform] = None,
+        output_path: Path, envs: Dict[str, TradingPlatform], freq: int,
+        render: bool = True,
         verbose: int = 0,
     ):
         super().__init__(verbose)
-        self._eval_freq = eval_freq
-        self._val_env = val_env
-        self._test_env = test_env
+        # Parameters
+        self._output_path = output_path
+        self._envs = envs
+        self._freq = freq
+        self._render = render
+        # Initialization
+        os.makedirs(output_path, exist_ok=True)
+        self._log_field_names = [
+            "ep_count",
+            *[f for n in self._envs.keys() for f in [f"{n}_earning", f"{n}_earning_discrepancy"]],
+        ]
+        with open(self._output_path / self._LOG_FILE_NAME, "w") as log_file:
+            log_writer = csv.DictWriter(log_file, self._log_field_names)
+            log_writer.writeheader()
+            log_file.flush()
+        self._log_records = []
         self._ep_count = 0
 
     def _on_training_start(self) -> None:
@@ -34,7 +59,7 @@ class FullEvalCallback(BaseCallback):
         # See: https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/common/callbacks.py#L590-L631
         if np.sum(self.locals["dones"]).item() != 0:
             self._ep_count += 1
-            if self._ep_count > 0 and self._ep_count % self._eval_freq == 0:
+            if self._ep_count > 0 and self._ep_count % self._freq == 0:
                 self.__eval_model()
         return super()._on_step()
 
@@ -43,7 +68,46 @@ class FullEvalCallback(BaseCallback):
         return super()._on_training_end()
 
     def __eval_model(self):
-        eval_model(self.model, self._val_env, test_env=self._test_env)
+        # Write log file
+        row: Dict[str, Any] = {"ep_count": self._ep_count}
+        for env_name, env in self._envs.items():
+            rendered, (_, earning, actual_price_change) = trade(env, model=self.model, stop_when_done=False)
+            if self._render:
+                show_image(rendered, text=", ".join([
+                    f"{env_name}_earning={earning:.2f}"
+                    f"{env_name}_actual_price_change={actual_price_change:.2f}",
+                ]))
+            Image.fromarray(rendered).save(self._output_path / f"trade_{self._ep_count}_{env_name}.png")
+            row |= {
+                f"{env_name}_earning": earning,
+                f"{env_name}_actual_price_change": actual_price_change,
+                f"{env_name}_earning_discrepancy": earning - actual_price_change,
+            }
+        with open(self._output_path / self._LOG_FILE_NAME, "a") as log_file:
+            log_writer = csv.DictWriter(log_file, self._log_field_names)
+            log_writer.writerow({k: v for k, v in row.items() if k in self._log_field_names})
+            log_file.flush()
+        # Draw chart
+        self._log_records.append(row)
+        figure = plt.figure(figsize=(10, 3 * len(self._envs)), dpi=800)
+        figure.subplots_adjust(left=0.05, bottom=0.1, right=1, top=0.95)
+        for i, env_name in enumerate(self._envs.keys()):
+            axes = figure.add_subplot(len(self._envs), 1, i + 1)
+            axes.plot(
+                [r["ep_count"] for r in self._log_records],
+                [r[f"{env_name}_actual_price_change"] for r in self._log_records],
+                color="gray",
+            )
+            axes.plot(
+                [r["ep_count"] for r in self._log_records],
+                [r[f"{env_name}_earning"] for r in self._log_records],
+                color="blue",
+            )
+        figure.canvas.draw()
+        image = np.frombuffer(figure.canvas.tostring_rgb(), dtype=np.uint8) \
+            .reshape(figure.canvas.get_width_height()[::-1] + (3,))
+        plt.close(figure)
+        Image.fromarray(image).save(self._output_path / self._CHART_FILE_NAME)
 
 
 def trade(
@@ -80,14 +144,6 @@ def trade(
     platform_balance = env._balance
     # Platform balance and self-calculated balance should be equal
     return rendered, (platform_balance, self_calculated_balance, actual_price_change)
-
-
-def eval_model(model: BaseAlgorithm, val_env: TradingPlatform, test_env: Optional[TradingPlatform] = None):
-    rendered, (_, earning, actual_price_change) = trade(val_env, model=model, stop_when_done=False)
-    show_image(rendered, text=f"earning={earning:.2f}, actual_price_change={actual_price_change:.2f}")
-    if test_env is not None:
-        rendered, (_, earning, actual_price_change) = trade(test_env, model=model, stop_when_done=False)
-        show_image(rendered, text=f"earning={earning:.2f}, actual_price_change={actual_price_change:.2f}")
 
 
 def show_image(image: Any, text: str = ""):
