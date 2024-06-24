@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 
@@ -72,13 +72,16 @@ class FullEvalCallback(BaseCallback):
         row: Dict[str, Any] = {"ep_count": self._ep_count}
         for env_name, env in self._envs.items():
             rendered, (_, earning, actual_price_change) = trade(env, model=self.model, stop_when_done=False)
+            image = Image.fromarray(rendered)
+            draw = ImageDraw.Draw(image)
+            draw.text((60, 60), f"Episode {self._ep_count}: " + ", ".join([
+                f"{env_name}_earning={earning:.2f}",
+                f"{env_name}_actual_price_change={actual_price_change:.2f}",
+            ]), fill=(0, 0, 0), font_size=120)
             if self._show_image:
                 plt.close("all")
-                show_image(rendered, text=", ".join([
-                    f"{env_name}_earning={earning:.2f}",
-                    f"{env_name}_actual_price_change={actual_price_change:.2f}",
-                ]))
-            Image.fromarray(rendered).save(self._output_path / f"trade_{self._ep_count}_{env_name}.png")
+                show_image(image)
+            image.save(self._output_path / f"trade_{self._ep_count}_{env_name}.png")
             row |= {
                 f"{env_name}_earning": earning,
                 f"{env_name}_actual_price_change": actual_price_change,
@@ -93,7 +96,7 @@ class FullEvalCallback(BaseCallback):
         # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
         # `num=2` is reserved for overview chart
         figure = plt.figure(figsize=(10, 3 * len(self._envs)), dpi=800, num=2, clear=True)
-        figure.subplots_adjust(left=0.05, bottom=0.1, right=1, top=0.95)
+        figure.subplots_adjust(left=0.05, bottom=0.1, right=0.95, top=0.9)
         for i, env_name in enumerate(self._envs.keys()):
             axes = figure.add_subplot(len(self._envs), 1, i + 1)
             axes.plot(
@@ -150,12 +153,10 @@ def trade(
     return rendered, (platform_balance, self_calculated_balance, actual_price_change)
 
 
-def show_image(image: Any, text: str = ""):
+def show_image(image: Any):
     figure = plt.figure(figsize=(10, 6), dpi=800)
     axes = figure.add_subplot(111)
     axes.imshow(image)
-    if text != "":
-        axes.text(0, 0, text)
     plt.axis("off")
     plt.tight_layout()
     plt.show()
