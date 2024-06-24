@@ -255,7 +255,7 @@ class TradingPlatform(gym.Env):
         # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
         # `num=1` is reserved for trading chart
         figure = plt.figure(figsize=(10, 6 if self.is_training_mode else 3), dpi=800, num=1, clear=True)
-        figure.subplots_adjust(left=0.05, bottom=0.1, right=1, top=0.95)
+        figure.subplots_adjust(left=0.05, bottom=0.1, right=0.95, top=0.9)
         # Plot prices and positions
         axes = figure.add_subplot(211 if self.is_training_mode else 111)
         prices = self._asset.retrieve_historical_prices(
