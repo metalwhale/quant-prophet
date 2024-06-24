@@ -17,19 +17,19 @@ class FullEvalCallback(BaseCallback):
     _output_path: Path
     _envs: Dict[str, TradingPlatform]
     _freq: int
-    _render: bool
+    _show_image: bool
 
     _ep_count: int
     _log_field_names: List[str]
     _log_records: List[Dict[str, Any]]
 
     _LOG_FILE_NAME = "log.csv"
-    _CHART_FILE_NAME = "chart.png"
+    _OVERVIEW_CHART_FILE_NAME = "overview.png"
 
     def __init__(
         self,
         output_path: Path, envs: Dict[str, TradingPlatform], freq: int,
-        render: bool = True,
+        show_image: bool = True,
         verbose: int = 0,
     ):
         super().__init__(verbose)
@@ -37,7 +37,7 @@ class FullEvalCallback(BaseCallback):
         self._output_path = output_path
         self._envs = envs
         self._freq = freq
-        self._render = render
+        self._show_image = show_image
         # Initialization
         os.makedirs(output_path, exist_ok=True)
         self._log_field_names = [
@@ -72,9 +72,10 @@ class FullEvalCallback(BaseCallback):
         row: Dict[str, Any] = {"ep_count": self._ep_count}
         for env_name, env in self._envs.items():
             rendered, (_, earning, actual_price_change) = trade(env, model=self.model, stop_when_done=False)
-            if self._render:
+            if self._show_image:
+                plt.close("all")
                 show_image(rendered, text=", ".join([
-                    f"{env_name}_earning={earning:.2f}"
+                    f"{env_name}_earning={earning:.2f}",
                     f"{env_name}_actual_price_change={actual_price_change:.2f}",
                 ]))
             Image.fromarray(rendered).save(self._output_path / f"trade_{self._ep_count}_{env_name}.png")
@@ -89,7 +90,9 @@ class FullEvalCallback(BaseCallback):
             log_file.flush()
         # Draw chart
         self._log_records.append(row)
-        figure = plt.figure(figsize=(10, 3 * len(self._envs)), dpi=800)
+        # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
+        # `num=2` is reserved for overview chart
+        figure = plt.figure(figsize=(10, 3 * len(self._envs)), dpi=800, num=2, clear=True)
         figure.subplots_adjust(left=0.05, bottom=0.1, right=1, top=0.95)
         for i, env_name in enumerate(self._envs.keys()):
             axes = figure.add_subplot(len(self._envs), 1, i + 1)
@@ -106,8 +109,9 @@ class FullEvalCallback(BaseCallback):
         figure.canvas.draw()
         image = np.frombuffer(figure.canvas.tostring_rgb(), dtype=np.uint8) \
             .reshape(figure.canvas.get_width_height()[::-1] + (3,))
-        plt.close(figure)
-        Image.fromarray(image).save(self._output_path / self._CHART_FILE_NAME)
+        if self._show_image:
+            plt.close("all")
+        Image.fromarray(image).save(self._output_path / self._OVERVIEW_CHART_FILE_NAME)
 
 
 def trade(
