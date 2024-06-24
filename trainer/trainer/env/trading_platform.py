@@ -252,7 +252,9 @@ class TradingPlatform(gym.Env):
     def render(self) -> Any | List[Any] | None:
         if self.render_mode != "rgb_array":
             return
-        figure = plt.figure(figsize=(10, 6 if self.is_training_mode else 3), dpi=800)
+        # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
+        # `num=1` is reserved for trading chart
+        figure = plt.figure(figsize=(10, 6 if self.is_training_mode else 3), dpi=800, num=1, clear=True)
         figure.subplots_adjust(left=0.05, bottom=0.1, right=1, top=0.95)
         # Plot prices and positions
         axes = figure.add_subplot(211 if self.is_training_mode else 111)
@@ -278,7 +280,6 @@ class TradingPlatform(gym.Env):
         figure.canvas.draw()
         image = np.frombuffer(figure.canvas.tostring_rgb(), dtype=np.uint8) \
             .reshape(figure.canvas.get_width_height()[::-1] + (3,))
-        plt.close(figure)
         return image
 
     def apply_date_range(
