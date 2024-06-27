@@ -17,7 +17,7 @@ class FullEvalCallback(BaseCallback):
     _output_path: Path
     _envs: Dict[str, TradingPlatform]
     _freq: int
-    _show_image: bool
+    _showing_image: bool
 
     _ep_count: int
     _log_field_names: List[str]
@@ -29,7 +29,7 @@ class FullEvalCallback(BaseCallback):
     def __init__(
         self,
         output_path: Path, envs: Dict[str, TradingPlatform], freq: int,
-        show_image: bool = True,
+        showing_image: bool = True,
         verbose: int = 0,
     ):
         super().__init__(verbose)
@@ -37,7 +37,7 @@ class FullEvalCallback(BaseCallback):
         self._output_path = output_path
         self._envs = envs
         self._freq = freq
-        self._show_image = show_image
+        self._showing_image = showing_image
         # Initialization
         os.makedirs(output_path, exist_ok=True)
         self._log_field_names = [
@@ -71,14 +71,14 @@ class FullEvalCallback(BaseCallback):
         # Write log file
         row: Dict[str, Any] = {"ep_count": self._ep_count}
         for env_name, env in self._envs.items():
-            rendered, (_, earning, actual_price_change) = trade(env, model=self.model, stop_when_done=False)
+            rendered, (_, earning, actual_price_change) = trade(env, model=self.model, stopping_when_done=False)
             image = Image.fromarray(rendered)
             draw = ImageDraw.Draw(image)
             draw.text((60, 60), f"Episode {self._ep_count}: " + ", ".join([
                 f"{env_name}_earning={earning:.2f}",
                 f"{env_name}_actual_price_change={actual_price_change:.2f}",
             ]), fill=(0, 0, 0), font_size=120)
-            if self._show_image:
+            if self._showing_image:
                 plt.close("all")
                 show_image(image)
             image.save(self._output_path / f"trade_{self._ep_count}_{env_name}.png")
@@ -112,15 +112,15 @@ class FullEvalCallback(BaseCallback):
         figure.canvas.draw()
         image = np.frombuffer(figure.canvas.tostring_rgb(), dtype=np.uint8) \
             .reshape(figure.canvas.get_width_height()[::-1] + (3,))
-        if self._show_image:
+        if self._showing_image:
             plt.close("all")
         Image.fromarray(image).save(self._output_path / self._OVERVIEW_CHART_FILE_NAME)
 
 
 def trade(
     env: TradingPlatform,
-    model: Optional[BaseAlgorithm] = None, max_step: Optional[int] = None, stop_when_done: bool = True,
-    render: bool = True,
+    model: Optional[BaseAlgorithm] = None, max_step: Optional[int] = None, stopping_when_done: bool = True,
+    rendering: bool = True,
 ) -> Tuple[Any, Tuple[float, ...]]:
     env.render_mode = "rgb_array"
     obs, _ = env.reset()
@@ -136,10 +136,10 @@ def trade(
         obs, _, terminated, truncated, info = env.step(action)
         is_end_of_date = info["is_end_of_date"]
         logging.debug("%s %f %f", env._prices[-1].date, env._prices[-1].actual_price, env._balance)
-        if is_end_of_date or (stop_when_done and (terminated or truncated)):
+        if is_end_of_date or (stopping_when_done and (terminated or truncated)):
             break
         step += 1
-    rendered = env.render() if render else None
+    rendered = env.render() if rendering else None
     # Calculate the balance
     self_calculated_balance = env._initial_balance
     earning, actual_price_change = calc_earning(
