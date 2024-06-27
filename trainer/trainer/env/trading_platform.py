@@ -56,7 +56,7 @@ class TradingPlatform(gym.Env):
     metadata = {"render_modes": ["rgb_array"]}
 
     # Control flags
-    is_training_mode: bool
+    is_training: bool
 
     # Terminology
     # "Episode" and "step":
@@ -147,6 +147,7 @@ class TradingPlatform(gym.Env):
         max_steps_num: int = 0,
     ) -> None:
         super().__init__()
+        self.is_training = True
         # Hyperparameters
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
@@ -187,9 +188,9 @@ class TradingPlatform(gym.Env):
     ) -> tuple[Dict[str, Any], dict[str, Any]]:
         super().reset(seed=seed, options=options)
         self._asset_symbol, self._date_range = self._asset_pool.choose_asset_date(
-            randomizing_start=self.is_training_mode, target_polarity_diff=-self._polarity_diff,
+            randomizing_start=self.is_training, target_polarity_diff=-self._polarity_diff,
         )
-        self._asset.prepare_indicators(randomizing_close=self.is_training_mode)
+        self._asset.prepare_indicators(randomizing_close=self.is_training)
         self._date_index = 0
         self._retrieve_prices()
         self._positions = [Position(
@@ -199,7 +200,7 @@ class TradingPlatform(gym.Env):
         self._balance = self._initial_balance + self._positions[-1].amount * -self._position_opening_fee  # Opening fee
         observation = self._obtain_observation()
         info = {}
-        if self.is_training_mode:
+        if self.is_training:
             self._date_chosen_counter[self._date_range[self._date_index]][self._asset_symbol] += 1
             self._polarity_diff += calc_polarity_diff(self._prices[-1].price_delta)
         return observation, info
@@ -250,7 +251,7 @@ class TradingPlatform(gym.Env):
         info = {
             "is_end_of_date": is_end_of_date,
         }
-        if self.is_training_mode:
+        if self.is_training:
             self._polarity_diff += calc_polarity_diff(self._prices[-1].price_delta)
         return observation, reward, terminated, truncated, info
 
@@ -259,15 +260,15 @@ class TradingPlatform(gym.Env):
             return
         # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
         # `num=1` is reserved for trading chart
-        figure = plt.figure(figsize=(10, 6 if self.is_training_mode else 3), dpi=800, num=1, clear=True)
+        figure = plt.figure(figsize=(10, 6 if self.is_training else 3), dpi=800, num=1, clear=True)
         figure.subplots_adjust(left=0.05, bottom=0.1, right=0.95, top=0.9)
         # Plot prices and positions
-        axes = figure.add_subplot(211 if self.is_training_mode else 111)
+        axes = figure.add_subplot(211 if self.is_training else 111)
         prices = self._asset.retrieve_historical_prices(
             self._date_range[self._date_index],
             # Retrieve all the days before the current date in the date range
             self._date_index + self._historical_days_num,
-            randomizing_end=self.is_training_mode,
+            randomizing_end=self.is_training,
         )
         dates = [p.date for p in prices]
         axes.plot(dates, [p.actual_price for p in prices], color="gray", linewidth=0.5)
@@ -278,7 +279,7 @@ class TradingPlatform(gym.Env):
                 color="green" if is_long else "red", marker="o", markersize=0.5,
             )
         # Plot date counter
-        if self.is_training_mode:
+        if self.is_training:
             axes = figure.add_subplot(212)
             axes.bar(dates, [sum(self._date_chosen_counter[d].values()) for d in dates])
         # Draw figure
@@ -308,13 +309,13 @@ class TradingPlatform(gym.Env):
 
     @property
     def _position_amount(self) -> float:
-        return self._POSITION_AMOUNT_UNIT if self.is_training_mode else self._prices[-1].actual_price
+        return self._POSITION_AMOUNT_UNIT if self.is_training else self._prices[-1].actual_price
 
     @property
     def _initial_balance(self) -> float:
         # NOTE: A zero initial balance may seem illogical, but in evaluation, only earnings matter, not the initial balance.
         # The balance is mainly used for training, while using price as a position amount often implies evaluation.
-        return self._INITIAL_BALANCE_UNIT if self.is_training_mode else 0
+        return self._INITIAL_BALANCE_UNIT if self.is_training else 0
 
     @property
     def _last_position_net_ratio(self) -> float:
@@ -330,12 +331,12 @@ class TradingPlatform(gym.Env):
             return
         self._prices = self._asset.retrieve_historical_prices(
             date, self._historical_days_num,
-            randomizing_end=self.is_training_mode,
+            randomizing_end=self.is_training,
         )
 
     def _obtain_observation(self) -> Dict[str, Any]:
         balance = 0
-        if self.is_training_mode:
+        if self.is_training:
             balance = self._balance
         else:
             # Ignore previous positions and only consider the current one, that means when not in training mode,
