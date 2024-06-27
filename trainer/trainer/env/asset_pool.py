@@ -61,7 +61,7 @@ class AssetPool:
         ahead_days_num: int,
         historical_days_num: int,
         min_date: Optional[datetime.date] = None, max_date: Optional[datetime.date] = None,
-        exclude_historical: bool = True,
+        excluding_historical: bool = True,
     ):
         for asset_date_range in self._asset_date_ranges.values():
             asset = asset_date_range.asset
@@ -69,13 +69,13 @@ class AssetPool:
             date_range = asset.find_matched_tradable_date_range(
                 historical_days_num,
                 min_date=min_date, max_date=max_date,
-                exclude_historical=exclude_historical,
+                excluding_historical=excluding_historical,
             )
             asset_date_range.date_polarities = _map_date_range_to_date_polarity(asset, date_range, ahead_days_num)
 
     def choose_asset_date(
         self,
-        random_start_day: bool = False,
+        randomizing_start: bool = False,
         target_polarity_diff: Optional[int] = None,
     ) -> Tuple[str, List[datetime.date]]:
         # Choose an asset based on favorite symbols
@@ -86,7 +86,7 @@ class AssetPool:
         # Get tradable date range
         date_polarities = self._asset_date_ranges[symbol].date_polarities
         date_range = [p.date for p in date_polarities]
-        if random_start_day:
+        if randomizing_start:
             # Date range needs to have at least two dates, one for the reset and one for a single step,
             # so when choosing the start date, we need to exclude the last date of date range.
             start_date_index = 0

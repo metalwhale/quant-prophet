@@ -124,7 +124,7 @@ class DailyAsset(ABC):
         self,
         historical_days_num: int,
         min_date: Optional[datetime.date] = None, max_date: Optional[datetime.date] = None,
-        exclude_historical: bool = True,
+        excluding_historical: bool = True,
     ) -> List[datetime.date]:
         if (
             (min_date is not None and max_date is not None and min_date > max_date)
@@ -142,7 +142,7 @@ class DailyAsset(ABC):
             extra_historical_days_count += 1
             # Stop skipping when we reach the last day of historical days
             if (
-                exclude_historical
+                excluding_historical
                 and extra_historical_days_count < historical_days_num + self.calc_buffer_days_num()
             ):
                 continue
@@ -158,11 +158,11 @@ class DailyAsset(ABC):
             return None
         return self.__candles[date_index].close / self.__candles[date_index - self.__DELTA_DISTANCE].close - 1
 
-    def prepare_indicators(self, random_close: bool = False):
+    def prepare_indicators(self, randomizing_close: bool = False):
         self.__indicators = []
         prev_ema: Optional[float] = None
         for candle in self.__candles:
-            price = np.random.uniform(candle.low, candle.high) if random_close else candle.close
+            price = np.random.uniform(candle.low, candle.high) if randomizing_close else candle.close
             # See: https://en.wikipedia.org/wiki/Exponential_smoothing
             ema = self.__calc_ema(price, prev_ema)
             self.__indicators.append(DailyIndicator(candle.date, (candle.low, candle.high), price, ema))
@@ -173,7 +173,7 @@ class DailyAsset(ABC):
     # where there is an option to be randomly chosen within the range of low price to high price.
     def retrieve_historical_prices(
         self, end_date: datetime.date, days_num: int,
-        random_end: bool = True,
+        randomizing_end: bool = True,
     ) -> List[DailyPrice]:
         end_date_index = self.__get_date_index(end_date)
         today = datetime.datetime.now().date()
@@ -200,7 +200,7 @@ class DailyAsset(ABC):
         if end_date == today:
             end_date_price = self._fetch_spot_price()
         else:
-            if random_end:
+            if randomizing_end:
                 end_date_price = np.random.uniform(*end_indicator.price_range)
             else:
                 end_date_price = end_indicator.price
