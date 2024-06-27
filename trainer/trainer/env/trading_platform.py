@@ -97,9 +97,10 @@ class TradingPlatform(gym.Env):
     #                          |
     #                          Episode's "first date", randomly chosen within training data's date range
 
-    # Hyperparameters
     _asset_pool: AssetPool
     _historical_days_num: int  # Number of days used for retrieving historical data
+
+    # Hyperparameters for calculating rewards
     # TODO: Reconsider the meaning of the opening fee.
     # I believe that changing the opening fee affects how often new positions are opened,
     # i.e., increasing the opening fee means the model may learn to open fewer positions.
@@ -109,6 +110,8 @@ class TradingPlatform(gym.Env):
     # Does it still make sense since we are always holding every day?
     _position_holding_daily_fee: float = 0.0  # Positive ratio (UNUSED)
     _short_period_penalty: float = 0.0  # Penalty for holding positions for too short a period (UNUSED)
+
+    # Hyperparameters for termination and truncation
     _max_balance_loss: float  # Positive ratio
     _max_balance_gain: float  # Positive ratio
     _max_positions_num: int  # Maximum number of positions (greater than 1) allowed in one episode
@@ -226,17 +229,19 @@ class TradingPlatform(gym.Env):
         # Read more about termination and truncation at:
         # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/handling_time_limits/
         # - https://farama.org/Gymnasium-Terminated-Truncated-Step-API
-        # Termination condition
+        # Termination conditions
         terminated = (
             # Liquidated
             self._balance < self._initial_balance * (1 - self._max_balance_loss)
-            # Realizing profits
-            or self._balance >= self._initial_balance * (1 + self._max_balance_gain)
         )
-        # Truncation condition
+        # Truncation conditions
         is_end_of_date = self._date_index >= len(self._date_range) - 1
         truncated = (
+            # Reaching the end of training date
             is_end_of_date
+            # Realizing profits
+            or self._balance >= self._initial_balance * (1 + self._max_balance_gain)
+            # Other conditions
             or len(self._positions) >= self._max_positions_num
             or self._date_index >= self._max_steps_num
         )
