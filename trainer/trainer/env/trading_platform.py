@@ -136,6 +136,8 @@ class TradingPlatform(gym.Env):
     _POSITION_AMOUNT_UNIT: float = 1.0  # Equal to or less than the initial balance
     _INITIAL_BALANCE_UNIT: float = 1.0
 
+    _CLOSE_RANDOM_RADIUS: Optional[int] = 0
+
     def __init__(
         self,
         asset_pool: AssetPool,
@@ -190,7 +192,7 @@ class TradingPlatform(gym.Env):
         self._asset_symbol, self._date_range = self._asset_pool.choose_asset_date(
             randomizing_start=self.is_training, target_polarity_diff=-self._polarity_diff,
         )
-        self._asset.prepare_indicators(randomizing_close=self.is_training)
+        self._asset.prepare_indicators(close_random_radius=self._CLOSE_RANDOM_RADIUS if self.is_training else None)
         self._date_index = 0
         self._retrieve_prices()
         self._positions = [Position(
