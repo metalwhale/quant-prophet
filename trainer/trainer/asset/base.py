@@ -158,14 +158,27 @@ class DailyAsset(ABC):
             return None
         return self.__candles[date_index].close / self.__candles[date_index - self.__DELTA_DISTANCE].close - 1
 
-    def prepare_indicators(self, randomizing_close: bool = False):
+    def prepare_indicators(self, close_random_radius: Optional[int] = None):
         self.__indicators = []
         prev_ema: Optional[float] = None
-        for candle in self.__candles:
-            price = np.random.uniform(candle.low, candle.high) if randomizing_close else candle.close
+        for i, candle in enumerate(self.__candles):
+            low = candle.low
+            high = candle.high
+            price = candle.close
+            if close_random_radius is not None:
+                j = max(i - close_random_radius, 0)
+                low = self.__candles[j].low
+                high = self.__candles[j].high
+                # Iterate through the neighboring candles within a specific radius,
+                # where a `radius = 0` means using only the current candle (no neighbors).
+                while j < min(i + close_random_radius, len(self.__candles) - 1):
+                    j += 1
+                    low = min(low, self.__candles[j].low)
+                    high = max(high, self.__candles[j].high)
+                price = np.random.uniform(low, high)
             # See: https://en.wikipedia.org/wiki/Exponential_smoothing
             ema = self.__calc_ema(price, prev_ema)
-            self.__indicators.append(DailyIndicator(candle.date, (candle.low, candle.high), price, ema))
+            self.__indicators.append(DailyIndicator(candle.date, (low, high), price, ema))
             prev_ema = ema
 
     # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
