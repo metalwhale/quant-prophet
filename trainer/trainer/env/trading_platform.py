@@ -171,7 +171,7 @@ class TradingPlatform(gym.Env):
             # Suppose that delta values (ratios) are greater than -1 and less than 1,
             # meaning prices and other indicators never drop to 0 and never double from previous day.
             "historical_price_deltas": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
-            "historical_ema_deltas": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            "historical_ema_price_diffs": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             # Position types have the same values as action space.
             "position_type": gym.spaces.Discrete(len(PositionType)),
             # Similar to price deltas, suppose that position net ratio is in range (-1, 1) compared to entry price.
@@ -348,7 +348,7 @@ class TradingPlatform(gym.Env):
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_price_deltas": np.array(self._norm_deltas([p.price_delta for p in self._prices])),
-            "historical_ema_deltas": np.array(self._norm_deltas([p.ema_delta for p in self._prices])),
+            "historical_ema_price_diffs": np.array(self._norm_deltas([p.ema_price_diff for p in self._prices])),
             "position_type": np.array([self._positions[-1].position_type], dtype=int),
             "position_net_ratio": np.array([self._last_position_net_ratio]),
             "balance": np.array([balance]),
