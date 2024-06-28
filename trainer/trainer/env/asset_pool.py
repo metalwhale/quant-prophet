@@ -103,7 +103,7 @@ class AssetPool:
                 distance_weights = [distances.index(d) + 1 for d in polarity_distances]
                 start_date_index = np.random.choice(
                     range(len(distance_weights)),
-                    p=_norm_prob(distance_weights, self._polarity_temperature),
+                    p=_softmax(distance_weights, self._polarity_temperature),
                 )
             date_range = date_range[start_date_index:]
         return symbol, date_range
@@ -141,7 +141,7 @@ def _map_date_range_to_date_polarity(
     return asset_polarities
 
 
-def _norm_prob(array: List, temperature: float) -> List:
+def _softmax(array: List, temperature: float) -> List:
     exp = [math.exp(e / temperature) for e in array]
     exp_sum = sum(exp)
     return [e / exp_sum for e in exp]
