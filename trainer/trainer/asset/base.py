@@ -72,16 +72,18 @@ class DailyPrice:
     _actual_price: float
     _price_delta: float  # Change in price expressed as a ratio compared to the previous day
     _ema_delta: float  # Change in ema expressed as a ratio compared to the previous day
+    _ema_price_diff: float  # Difference in ratio between ema and price
 
     def __init__(
         self,
         date: datetime.date, actual_price: float,
-        price_delta: float, ema_delta: float,
+        price_delta: float, ema_delta: float, ema_price_diff: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
         self._price_delta = price_delta
         self._ema_delta = ema_delta
+        self._ema_price_diff = ema_price_diff
 
     @property
     def date(self) -> datetime.date:
@@ -98,6 +100,10 @@ class DailyPrice:
     @property
     def ema_delta(self) -> float:
         return self._ema_delta
+
+    @property
+    def ema_price_diff(self) -> float:
+        return self._ema_price_diff
 
 
 class DailyAsset(ABC):
@@ -207,6 +213,7 @@ class DailyAsset(ABC):
                 self.__indicators[i].price,
                 self.__indicators[i].price / self.__indicators[i - self.__DELTA_DISTANCE].price - 1,
                 self.__indicators[i].ema / self.__indicators[i - self.__DELTA_DISTANCE].ema - 1,
+                self.__indicators[i].ema / self.__indicators[i].price - 1,
             ))
         # Price for `end_date`
         end_date_price = 0
@@ -223,6 +230,7 @@ class DailyAsset(ABC):
             end_date_price,
             end_date_price / self.__indicators[end_date_index - self.__DELTA_DISTANCE].price - 1,
             end_date_ema / self.__indicators[end_date_index - self.__DELTA_DISTANCE].ema - 1,
+            end_date_ema / end_date_price - 1,
         ))
         return prices
 
@@ -232,6 +240,7 @@ class DailyAsset(ABC):
         return max(
             cls.__DELTA_DISTANCE,  # For price deltas (`DailyPrice.price_delta`)
             cls.__EMA_PERIOD + cls.__DELTA_DISTANCE,  # For ema deltas (`DailyPrice.ema_delta`)
+            cls.__EMA_PERIOD,  # For ema-price diffs (`DailyPrice.ema_price_diff`)
         )
 
     @property
