@@ -347,15 +347,15 @@ class TradingPlatform(gym.Env):
                 * (-self._position_opening_fee + self._last_position_net_ratio)
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
-            "historical_price_deltas": np.array(self._norm_deltas([p.price_delta for p in self._prices])),
-            "historical_ema_price_diffs": np.array(self._norm_deltas([p.ema_price_diff for p in self._prices])),
+            "historical_price_deltas": np.array(self._minmax_scale([p.price_delta for p in self._prices])),
+            "historical_ema_price_diffs": np.array(self._minmax_scale([p.ema_price_diff for p in self._prices])),
             "position_type": np.array([self._positions[-1].position_type], dtype=int),
             "position_net_ratio": np.array([self._last_position_net_ratio]),
             "balance": np.array([balance]),
         }
 
     @staticmethod
-    def _norm_deltas(deltas: List[float]) -> List[float]:
+    def _minmax_scale(deltas: List[float]) -> List[float]:
         # TODO: Is it ok to use instance normalization?
         max_delta = max([abs(d) for d in deltas])
         deltas = [d / max_delta for d in deltas]
