@@ -16,7 +16,7 @@ MAX_DAYS_NUM = None  # YEARLY_TRADABLE_DAYS_NUM * 20
 LAST_TRAINING_DATE = datetime.datetime.strptime("2019-12-31", "%Y-%m-%d").date()
 LAST_VALIDATION_DATE = datetime.datetime.strptime("2022-12-31", "%Y-%m-%d").date()
 HISTORICAL_DAYS_NUM = MONTHLY_TRADABLE_DAYS_NUM * 6
-POSITION_OPENING_FEE = 0.01
+POSITION_OPENING_FEE = 0.025
 SYMBOLS = ["AAPL"]
 
 
