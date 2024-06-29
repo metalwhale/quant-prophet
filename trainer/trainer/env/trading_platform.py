@@ -174,12 +174,6 @@ class TradingPlatform(gym.Env):
             "historical_ema_price_diffs": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             # Position types have the same values as action space.
             "position_type": gym.spaces.Discrete(len(PositionType)),
-            # Similar to price deltas, suppose that position net ratio is in range (-1, 1) compared to entry price.
-            # TODO: Consider cases when position net ratio can be greater than 1.
-            "position_net_ratio": gym.spaces.Box(-1, 1, shape=(1,)),
-            # Regardless of whether the environment is in trading mode or not, always obtain the balance in "units",
-            # in other words, consider the initial balance and position amounts as based on `1`.
-            "balance": gym.spaces.Box(0, 2, shape=(1,)),
         })
         # Refresh platform-level state components
         self.refresh()
@@ -337,21 +331,11 @@ class TradingPlatform(gym.Env):
         )
 
     def _obtain_observation(self) -> Dict[str, Any]:
-        balance = 0
-        if self.is_training:
-            balance = self._balance
-        else:
-            # Ignore previous positions and only consider the current one, that means when not in training mode,
-            # we always treat the current position as the first position of an episode.
-            balance = self._INITIAL_BALANCE_UNIT + self._POSITION_AMOUNT_UNIT \
-                * (-self._position_opening_fee + self._last_position_net_ratio)
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_price_deltas": np.array(self._minmax_scale([p.price_delta for p in self._prices])),
             "historical_ema_price_diffs": np.array(self._minmax_scale([p.ema_price_diff for p in self._prices])),
             "position_type": np.array([self._positions[-1].position_type], dtype=int),
-            "position_net_ratio": np.array([self._last_position_net_ratio]),
-            "balance": np.array([balance]),
         }
 
     @staticmethod
