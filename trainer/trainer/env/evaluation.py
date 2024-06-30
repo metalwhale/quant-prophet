@@ -71,6 +71,7 @@ class FullEvalCallback(BaseCallback):
         # Write log file
         row: Dict[str, Any] = {"ep_count": self._ep_count}
         for env_name, env in self._envs.items():
+            # TODO: Iterate through all assets
             rendered, (_, earning, actual_price_change) = trade(env, model=self.model, stopping_when_done=False)
             image = Image.fromarray(rendered)
             draw = ImageDraw.Draw(image)
