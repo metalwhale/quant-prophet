@@ -144,7 +144,7 @@ def trade(
     self_calculated_balance = env._initial_balance
     earning, actual_price_change = calc_earning(
         env._positions, env._prices[-1],
-        position_opening_fee=env._position_opening_fee if env.is_training else 0,
+        position_opening_penalty=env._position_opening_penalty if env.is_training else 0,
     )
     self_calculated_balance += earning
     logging.debug("%s %f", env._prices[-1].date, env._prices[-1].actual_price)
