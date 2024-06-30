@@ -21,20 +21,10 @@ class Sinusoid(DailyAsset):
         published_time: datetime.datetime,
         alpha: float = math.pi, beta: float = 1.0, gamma1: float = 0.0, gamma2: float = 0.0,
     ) -> None:
-        DailyAsset.__init__(self, symbol)
+        super().__init__(symbol)
         self._published_time = published_time
-        self._get_price = lambda time: self._sine(time, self._published_time, alpha, beta, gamma1, gamma2)
+        self._get_price = lambda time: sine(time, self._published_time, alpha, beta, gamma1, gamma2)
         self._initialize()  # For fetching candles
-
-    # sin(α*x+γ1)*β+γ2
-    @staticmethod
-    def _sine(
-        time: datetime.datetime, published_time: datetime.datetime,
-        alpha: float, beta: float, gamma1: float, gamma2: float,
-    ) -> float:
-        # Use 1 day (86400 seconds) as 1 unit of time.
-        x = (time - published_time).total_seconds() / 86400
-        return math.sin(alpha * x + gamma1) * beta + gamma2
 
     def _fetch_candles(self) -> List[DailyCandle]:
         date = self._published_time.date()
@@ -80,4 +70,15 @@ class ComposedSinusoid(Sinusoid):
         beta = np.random.uniform(*beta_range)
         gamma1 = np.random.uniform(*gamma1_range)
         gamma2 = np.random.uniform(*gamma2_range)
-        return lambda time: self._sine(time, self._published_time, alpha, beta, gamma1, gamma2)
+        return lambda time: sine(time, self._published_time, alpha, beta, gamma1, gamma2)
+
+
+@staticmethod
+# sin(α*x+γ1)*β+γ2
+def sine(
+    time: datetime.datetime, published_time: datetime.datetime,
+    alpha: float, beta: float, gamma1: float, gamma2: float,
+) -> float:
+    # Use 1 day (86400 seconds) as 1 unit of time.
+    x = (time - published_time).total_seconds() / 86400
+    return math.sin(alpha * x + gamma1) * beta + gamma2

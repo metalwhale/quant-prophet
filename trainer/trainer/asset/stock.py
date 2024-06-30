@@ -11,7 +11,7 @@ class Stock(DailyAsset):
     _max_days_num: int
 
     def __init__(self, symbol: str, stock_dir_path: os.PathLike, max_days_num: Optional[int] = None) -> None:
-        DailyAsset.__init__(self, symbol)
+        super().__init__(symbol)
         self._data_dir_path = stock_dir_path
         self._max_days_num = max_days_num
         self._initialize()  # For fetching candles
