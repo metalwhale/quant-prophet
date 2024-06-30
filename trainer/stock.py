@@ -16,7 +16,7 @@ MAX_DAYS_NUM = None  # YEARLY_TRADABLE_DAYS_NUM * 20
 LAST_TRAINING_DATE = datetime.datetime.strptime("2019-12-31", "%Y-%m-%d").date()
 LAST_VALIDATION_DATE = datetime.datetime.strptime("2022-12-31", "%Y-%m-%d").date()
 HISTORICAL_DAYS_NUM = MONTHLY_TRADABLE_DAYS_NUM * 6
-POSITION_OPENING_FEE = 0.025
+POSITION_OPENING_PENALTY = 0.025
 SYMBOLS = ["AAPL"]
 
 
@@ -29,28 +29,28 @@ def generate_envs() -> Tuple[TradingPlatform, Dict[str, TradingPlatform]]:
     # Training environment
     train_env = TradingPlatform(
         generate_asset_pool(SYMBOLS), HISTORICAL_DAYS_NUM,
-        position_opening_fee=POSITION_OPENING_FEE,
+        position_opening_penalty=POSITION_OPENING_PENALTY,
         max_balance_loss=1.0, max_balance_gain=0.5, max_positions_num=50, max_steps_num=YEARLY_TRADABLE_DAYS_NUM,
     )
     train_env.is_training = True
     train_env.apply_date_range(max_date=LAST_TRAINING_DATE)
     rep_train_env = TradingPlatform(
         generate_asset_pool(SYMBOLS), HISTORICAL_DAYS_NUM,
-        position_opening_fee=POSITION_OPENING_FEE,
+        position_opening_penalty=POSITION_OPENING_PENALTY,
     )
     rep_train_env.is_training = False
     rep_train_env.apply_date_range(max_date=LAST_TRAINING_DATE)
     # Validation environment
     val_env = TradingPlatform(
         generate_asset_pool(SYMBOLS), HISTORICAL_DAYS_NUM,
-        position_opening_fee=POSITION_OPENING_FEE,
+        position_opening_penalty=POSITION_OPENING_PENALTY,
     )
     val_env.is_training = False
     val_env.apply_date_range(min_date=LAST_TRAINING_DATE, max_date=LAST_VALIDATION_DATE, excluding_historical=False)
     # Test environment
     test_env = TradingPlatform(
         generate_asset_pool(SYMBOLS), HISTORICAL_DAYS_NUM,
-        position_opening_fee=POSITION_OPENING_FEE,
+        position_opening_penalty=POSITION_OPENING_PENALTY,
     )
     test_env.is_training = False
     test_env.apply_date_range(min_date=LAST_VALIDATION_DATE, excluding_historical=False)
