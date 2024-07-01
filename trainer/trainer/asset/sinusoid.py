@@ -40,9 +40,6 @@ class Sinusoid(DailyAsset):
             date += datetime.timedelta(days=1)
         return candles
 
-    def _fetch_spot_price(self) -> float:
-        return self._get_price(datetime.datetime.now())
-
 
 class ComposedSinusoid(Sinusoid):
     def __init__(

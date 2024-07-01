@@ -28,7 +28,3 @@ class Stock(DailyAsset):
         if self._max_days_num is not None and self._max_days_num < len(candles):
             candles = candles[-self._max_days_num:]
         return candles
-
-    def _fetch_spot_price(self) -> float:
-        # TODO: Implement this method
-        raise NotImplementedError
