@@ -17,7 +17,7 @@ YEARLY_TRADABLE_DAYS_NUM = 250
 LAST_TRAINING_DATE = datetime.datetime.strptime("2019-12-31", "%Y-%m-%d").date()
 LAST_VALIDATION_DATE = datetime.datetime.strptime("2022-12-31", "%Y-%m-%d").date()
 HISTORICAL_DAYS_NUM = MONTHLY_TRADABLE_DAYS_NUM * 6
-POSITION_OPENING_PENALTY = 0.025
+POSITION_OPENING_PENALTY = 0.01
 
 STOCK_MAX_DAYS_NUM = None  # YEARLY_TRADABLE_DAYS_NUM * 20
 STOCK_SYMBOLS = ["AAPL"]
@@ -40,9 +40,7 @@ def generate_zigzag_asset_pool(assets_num: int) -> AssetPool:
         Zigzag(
             str(i),
             ZIGZAG_PUBLISHED_DATE, np.random.uniform(0, 100),
-            (0.2, 0.45, 0.35),
-            (5, 15), (-0.05, 0.05), (2, 6), (0.0025, 0.0075),
-            (-0.01, 0.01),
+            (0.55, 0.45), (2, 6), (0.0, 0.01), (-0.02, 0.02),
         )
         for i in range(assets_num)
     ]
