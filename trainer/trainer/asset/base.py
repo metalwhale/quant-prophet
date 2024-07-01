@@ -195,13 +195,9 @@ class DailyAsset(ABC):
         randomizing_end: bool = True,
     ) -> List[DailyPrice]:
         end_date_index = self.__get_date_index(end_date)
-        today = datetime.datetime.now().date()
-        if (
-            # We need `days_num` days for historical data (including the end date),
-            # plus a few buffer days to calculate price deltas and indicators for the start day.
-            end_date_index is None or end_date_index < (days_num - 1) + self.calc_buffer_days_num()
-            or self.__indicators[end_date_index].date > today
-        ):
+        # We need `days_num` days for historical data (including the end date),
+        # plus a few buffer days to calculate price deltas and indicators for the start day.
+        if end_date_index is None or end_date_index < (days_num - 1) + self.calc_buffer_days_num():
             return []
         end_indicator = self.__indicators[end_date_index]
         prices: List[DailyPrice] = []
@@ -216,14 +212,11 @@ class DailyAsset(ABC):
                 self.__indicators[i].ema / self.__indicators[i].price - 1,
             ))
         # Price for `end_date`
-        end_date_price = 0
-        if end_date == today:
-            end_date_price = self._fetch_spot_price()
+        end_date_price = 0.0
+        if randomizing_end:
+            end_date_price = np.random.uniform(*end_indicator.price_range)
         else:
-            if randomizing_end:
-                end_date_price = np.random.uniform(*end_indicator.price_range)
-            else:
-                end_date_price = end_indicator.price
+            end_date_price = end_indicator.price
         end_date_ema = self.__calc_ema(end_date_price, self.__indicators[end_date_index - 1].ema)
         prices.append(DailyPrice(
             end_indicator.date,
@@ -259,11 +252,6 @@ class DailyAsset(ABC):
     # Returns list of candles in ascending order of day
     @abstractmethod
     def _fetch_candles(self) -> List[DailyCandle]:
-        pass
-
-    # Returns the price at the current moment
-    @abstractmethod
-    def _fetch_spot_price(self) -> float:
         pass
 
     def __get_date_index(self, date: datetime.date) -> Optional[int]:

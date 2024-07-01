@@ -93,10 +93,6 @@ class Zigzag(DailyAsset):
             candles.append(DailyCandle(date, high, low, close))
         return candles
 
-    def _fetch_spot_price(self) -> float:
-        # TODO: Implement this method
-        raise NotImplementedError
-
 
 def smoothen(array: List[float], ma_window: int) -> List[float]:
     # See: https://stackoverflow.com/a/34387987
