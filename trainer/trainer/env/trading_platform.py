@@ -287,12 +287,11 @@ class TradingPlatform(gym.Env):
 
     def apply_date_range(
         self,
-        min_date: Optional[datetime.date] = None, max_date: Optional[datetime.date] = None,
+        date_range: Tuple[Optional[datetime.date], Optional[datetime.date]],
         excluding_historical: bool = True,
     ):
         self._asset_pool.apply_date_range_matcher(
-            self._max_steps_num, self._historical_days_num,
-            min_date=min_date, max_date=max_date,
+            self._max_steps_num, self._historical_days_num, date_range,
             excluding_historical=excluding_historical,
         )
 

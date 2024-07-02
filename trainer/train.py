@@ -59,27 +59,27 @@ def generate_envs(
         max_balance_loss=1.0, max_balance_gain=0.5, max_positions_num=50, max_steps_num=YEARLY_TRADABLE_DAYS_NUM,
     )
     train_env.is_training = True
-    train_env.apply_date_range(max_date=LAST_TRAINING_DATE)
+    train_env.apply_date_range((None, LAST_TRAINING_DATE))
     rep_train_env = TradingPlatform(
         train_asset_pool_generator(), HISTORICAL_DAYS_NUM,
         position_opening_penalty=POSITION_OPENING_PENALTY,
     )
     rep_train_env.is_training = False
-    rep_train_env.apply_date_range(max_date=LAST_TRAINING_DATE)
+    rep_train_env.apply_date_range((None, LAST_TRAINING_DATE))
     # Validation environment
     val_env = TradingPlatform(
         val_asset_pool_generator(), HISTORICAL_DAYS_NUM,
         position_opening_penalty=POSITION_OPENING_PENALTY,
     )
     val_env.is_training = False
-    val_env.apply_date_range(min_date=LAST_TRAINING_DATE, max_date=LAST_VALIDATION_DATE, excluding_historical=False)
+    val_env.apply_date_range((LAST_TRAINING_DATE, LAST_VALIDATION_DATE), excluding_historical=False)
     # Test environment
     test_env = TradingPlatform(
         test_asset_pool_generator(), HISTORICAL_DAYS_NUM,
         position_opening_penalty=POSITION_OPENING_PENALTY,
     )
     test_env.is_training = False
-    test_env.apply_date_range(min_date=LAST_VALIDATION_DATE, excluding_historical=False)
+    test_env.apply_date_range((LAST_VALIDATION_DATE, None), excluding_historical=False)
     return train_env, {"train": rep_train_env, "val": val_env, "test": test_env}
 
 

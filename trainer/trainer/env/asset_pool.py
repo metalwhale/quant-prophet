@@ -60,18 +60,19 @@ class AssetPool:
         self,
         ahead_days_num: int,
         historical_days_num: int,
-        min_date: Optional[datetime.date] = None, max_date: Optional[datetime.date] = None,
+        date_range: Tuple[Optional[datetime.date], Optional[datetime.date]],
         excluding_historical: bool = True,
     ):
+        min_date, max_date = date_range
         for asset_date_range in self._asset_date_ranges.values():
             asset = asset_date_range.asset
             # Choose a tradable date range
-            date_range = asset.find_matched_tradable_date_range(
+            tradable_date_range = asset.find_matched_tradable_date_range(
                 historical_days_num,
                 min_date=min_date, max_date=max_date,
                 excluding_historical=excluding_historical,
             )
-            asset_date_range.date_polarities = _map_date_range_to_date_polarity(asset, date_range, ahead_days_num)
+            asset_date_range.date_polarities = _map_to_date_polarity(asset, tradable_date_range, ahead_days_num)
 
     def choose_asset_date(
         self,
@@ -116,7 +117,7 @@ def calc_polarity_diff(price_delta: float) -> int:
     return 1 if price_delta >= 0 else -1
 
 
-def _map_date_range_to_date_polarity(
+def _map_to_date_polarity(
     asset: DailyAsset,
     date_range: List[datetime.date], ahead_days_num: int,
 ) -> List[DatePolarity]:
