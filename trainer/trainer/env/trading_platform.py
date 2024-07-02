@@ -135,7 +135,7 @@ class TradingPlatform(gym.Env):
     # Here, all set to 1 for simplicity.
     _POSITION_AMOUNT_UNIT: float = 1.0  # Equal to or less than the initial balance
     _INITIAL_BALANCE_UNIT: float = 1.0
-
+    _ASSET_TYPE_WEIGHTS: Tuple[float, float] = [0.0, 1.0]  # (primary, secondary)
     _CLOSE_RANDOM_RADIUS: Optional[int] = 0
 
     def __init__(
@@ -183,10 +183,15 @@ class TradingPlatform(gym.Env):
         seed: int | None = None, options: dict[str, Any] | None = None,
     ) -> tuple[Dict[str, Any], dict[str, Any]]:
         super().reset(seed=seed, options=options)
-        if self.is_training:
-            self._asset_pool.renew_assets()
+        preferring_secondary = (
+            self.is_training and self._asset_pool.is_secondary_generatable
+            and np.random.choice([False, True], p=self._ASSET_TYPE_WEIGHTS)
+        )
+        if preferring_secondary:
+            self._asset_pool.renew_secondary_assets()
         self._asset_symbol, self._date_range = self._asset_pool.choose_asset_date(
             randomizing_start=self.is_training, target_polarity_diff=-self._polarity_diff,
+            preferring_secondary=preferring_secondary,
         )
         self._asset.prepare_indicators(close_random_radius=self._CLOSE_RANDOM_RADIUS if self.is_training else None)
         self._date_index = 0

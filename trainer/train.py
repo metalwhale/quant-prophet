@@ -88,8 +88,8 @@ def generate_envs(
 if __name__ == "__main__":
     train_env, eval_envs = generate_envs(
         lambda: AssetPool(
-            generate_zigzag_assets(1),
-            asset_generator=lambda: generate_zigzag_assets(1),
+            generate_zigzag_assets(5),
+            secondary_asset_generator=lambda: generate_zigzag_assets(1),
             polarity_temperature=5.0,
         ),
         lambda: AssetPool(generate_zigzag_assets(5), polarity_temperature=5.0),

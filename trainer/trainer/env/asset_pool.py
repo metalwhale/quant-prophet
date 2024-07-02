@@ -47,10 +47,9 @@ class AssetDateRange:
 
 
 class AssetPool:
-    primary_symbols: Optional[List[str]]
-
     _asset_date_ranges: OrderedDict[str, AssetDateRange]
-    _asset_generator: Optional[Callable[[], List[DailyAsset]]]
+    _primary_symbols: List[str]
+    _secondary_asset_generator: Optional[Callable[[], List[DailyAsset]]]
     _polarity_temperature: float
 
     _date_range: Tuple[Optional[datetime.date], Optional[datetime.date]]
@@ -60,13 +59,14 @@ class AssetPool:
 
     def __init__(
         self,
-        assets: List[DailyAsset],
-        asset_generator: Optional[Callable[[], List[DailyAsset]]] = None,
+        primary_assets: List[DailyAsset],
+        secondary_asset_generator: Optional[Callable[[], List[DailyAsset]]] = None,
         polarity_temperature: float = 1.0,
     ) -> None:
-        self.primary_symbols = None
-        self._asset_date_ranges = OrderedDict([(a.symbol, AssetDateRange(a)) for a in assets])
-        self._asset_generator = asset_generator
+        # Use `OrderedDict` to keep secondary symbols in order, popping the oldest when renewing
+        self._asset_date_ranges = OrderedDict([(a.symbol, AssetDateRange(a)) for a in primary_assets])
+        self._primary_symbols = [a.symbol for a in primary_assets]
+        self._secondary_asset_generator = secondary_asset_generator
         self._polarity_temperature = polarity_temperature
 
     def apply_date_range_matcher(
@@ -92,18 +92,18 @@ class AssetPool:
             )
             asset_date_range.date_polarities = _map_to_date_polarity(asset, tradable_date_range, ahead_days_num)
 
-    def renew_assets(self):
-        if self._asset_generator is None:
+    def renew_secondary_assets(self):
+        if not self.is_secondary_generatable:
             return
-        # Generate new assets
-        assets = self._asset_generator()
-        # Delete oldest assets
-        for old_symbol in [
+        # Generate new secondary assets
+        assets = self._secondary_asset_generator()
+        # Delete old secondary assets
+        for secondary_symbol in [
             s for s in self._asset_date_ranges.keys()
-            if self.primary_symbols is None or s not in self.primary_symbols  # Avoid accidentally deleting primary symbols
+            if s not in self._primary_symbols  # Avoid accidentally deleting primary symbols
         ][:len(assets)]:
-            self._asset_date_ranges.pop(old_symbol)
-        # Apply date range to new assets
+            self._asset_date_ranges.pop(secondary_symbol)
+        # Apply date range to new secondary assets
         min_date, max_date = self._date_range
         for asset in assets:
             asset_date_range = AssetDateRange(asset)
@@ -119,8 +119,15 @@ class AssetPool:
         self,
         randomizing_start: bool = False,
         target_polarity_diff: Optional[int] = None,
+        preferring_secondary: bool = False,
     ) -> Tuple[str, List[datetime.date]]:
-        symbol = np.random.choice(list(self._asset_date_ranges.keys()))
+        symbol = np.random.choice([
+            s for s in self._asset_date_ranges.keys()
+            if (
+                (preferring_secondary and s not in self._primary_symbols)
+                or (not preferring_secondary and s in self._primary_symbols)
+            )
+        ])
         # Get tradable date range
         date_polarities = self._asset_date_ranges[symbol].date_polarities
         date_range = [p.date for p in date_polarities]
@@ -148,6 +155,10 @@ class AssetPool:
 
     def get_asset(self, symbol: str) -> DailyAsset:
         return self._asset_date_ranges[symbol].asset
+
+    @property
+    def is_secondary_generatable(self) -> bool:
+        return self._secondary_asset_generator is not None
 
 
 def calc_polarity_diff(price_delta: float) -> int:
