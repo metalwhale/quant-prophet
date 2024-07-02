@@ -1,6 +1,7 @@
 import datetime
+import string
 from pathlib import Path
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, List, Tuple
 
 import numpy as np
 from stable_baselines3 import DQN
@@ -24,7 +25,7 @@ STOCK_SYMBOLS = ["AAPL"]
 ZIGZAG_PUBLISHED_DATE = datetime.datetime.strptime("2000-01-01", "%Y-%m-%d").date()
 
 
-def generate_stock_asset_pool() -> AssetPool:
+def generate_stock_assets() -> List[Stock]:
     assets = [
         Stock(
             symbol, Path(__file__).parent.parent / "data" / "stock" / "input" / "us",
@@ -32,19 +33,20 @@ def generate_stock_asset_pool() -> AssetPool:
         )
         for symbol in STOCK_SYMBOLS
     ]
-    return AssetPool(assets, polarity_temperature=5.0)
+    return assets
 
 
-def generate_zigzag_asset_pool(assets_num: int) -> AssetPool:
+def generate_zigzag_assets(assets_num: int) -> List[Zigzag]:
     assets = [
         Zigzag(
-            str(i),
+            datetime.datetime.now().strftime("%Y%m%d%H%M%S") + "_"
+            + "".join(np.random.choice([*(string.ascii_letters + string.digits)], size=4)),
             ZIGZAG_PUBLISHED_DATE, np.random.uniform(0, 100),
             (0.55, 0.45), (2, 6), (0.0, 0.01), (-0.02, 0.02),
         )
-        for i in range(assets_num)
+        for _ in range(assets_num)
     ]
-    return AssetPool(assets, polarity_temperature=5.0)
+    return assets
 
 
 def generate_envs(
@@ -85,9 +87,13 @@ def generate_envs(
 
 if __name__ == "__main__":
     train_env, eval_envs = generate_envs(
-        lambda: generate_zigzag_asset_pool(50),
-        lambda: generate_zigzag_asset_pool(5),
-        lambda: generate_zigzag_asset_pool(5),
+        lambda: AssetPool(
+            generate_zigzag_assets(1),
+            asset_generator=lambda: generate_zigzag_assets(1),
+            polarity_temperature=5.0,
+        ),
+        lambda: AssetPool(generate_zigzag_assets(5), polarity_temperature=5.0),
+        lambda: AssetPool(generate_zigzag_assets(5), polarity_temperature=5.0),
     )
     now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     model = DQN(

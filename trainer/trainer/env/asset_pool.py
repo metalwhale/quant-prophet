@@ -1,6 +1,7 @@
 import datetime
 import math
-from typing import Dict, List, Optional, Tuple
+from collections import OrderedDict
+from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 
@@ -46,23 +47,40 @@ class AssetDateRange:
 
 
 class AssetPool:
-    favorite_symbols: Optional[List[str]]
+    primary_symbols: Optional[List[str]]
 
-    _asset_date_ranges: Dict[str, AssetDateRange]
+    _asset_date_ranges: OrderedDict[str, AssetDateRange]
+    _asset_generator: Optional[Callable[[], List[DailyAsset]]]
     _polarity_temperature: float
 
-    def __init__(self, assets: List[DailyAsset], polarity_temperature: float = 1.0) -> None:
-        self.favorite_symbols = None
-        self._asset_date_ranges = {a.symbol: AssetDateRange(a) for a in assets}
+    _date_range: Tuple[Optional[datetime.date], Optional[datetime.date]]
+    _historical_days_num: int
+    _ahead_days_num: int
+    _excluding_historical: bool
+
+    def __init__(
+        self,
+        assets: List[DailyAsset],
+        asset_generator: Optional[Callable[[], List[DailyAsset]]] = None,
+        polarity_temperature: float = 1.0,
+    ) -> None:
+        self.primary_symbols = None
+        self._asset_date_ranges = OrderedDict([(a.symbol, AssetDateRange(a)) for a in assets])
+        self._asset_generator = asset_generator
         self._polarity_temperature = polarity_temperature
 
     def apply_date_range_matcher(
         self,
-        ahead_days_num: int,
-        historical_days_num: int,
         date_range: Tuple[Optional[datetime.date], Optional[datetime.date]],
+        historical_days_num: int,
+        ahead_days_num: int,
         excluding_historical: bool = True,
     ):
+        self._date_range = date_range
+        self._historical_days_num = historical_days_num
+        self._ahead_days_num = ahead_days_num
+        self._excluding_historical = excluding_historical
+        # Match date range
         min_date, max_date = date_range
         for asset_date_range in self._asset_date_ranges.values():
             asset = asset_date_range.asset
@@ -74,16 +92,35 @@ class AssetPool:
             )
             asset_date_range.date_polarities = _map_to_date_polarity(asset, tradable_date_range, ahead_days_num)
 
+    def renew_assets(self):
+        if self._asset_generator is None:
+            return
+        # Generate new assets
+        assets = self._asset_generator()
+        # Delete oldest assets
+        for old_symbol in [
+            s for s in self._asset_date_ranges.keys()
+            if self.primary_symbols is None or s not in self.primary_symbols  # Avoid accidentally deleting primary symbols
+        ][:len(assets)]:
+            self._asset_date_ranges.pop(old_symbol)
+        # Apply date range to new assets
+        min_date, max_date = self._date_range
+        for asset in assets:
+            asset_date_range = AssetDateRange(asset)
+            tradable_date_range = asset.find_matched_tradable_date_range(
+                self._historical_days_num,
+                min_date=min_date, max_date=max_date,
+                excluding_historical=self._excluding_historical,
+            )
+            asset_date_range.date_polarities = _map_to_date_polarity(asset, tradable_date_range, self._ahead_days_num)
+            self._asset_date_ranges[asset.symbol] = asset_date_range
+
     def choose_asset_date(
         self,
         randomizing_start: bool = False,
         target_polarity_diff: Optional[int] = None,
     ) -> Tuple[str, List[datetime.date]]:
-        # Choose an asset based on favorite symbols
-        symbols = list(self._asset_date_ranges.keys())
-        if self.favorite_symbols is not None:
-            symbols = [s for s in self._asset_date_ranges.keys() if s in self.favorite_symbols]
-        symbol = np.random.choice(symbols)
+        symbol = np.random.choice(list(self._asset_date_ranges.keys()))
         # Get tradable date range
         date_polarities = self._asset_date_ranges[symbol].date_polarities
         date_range = [p.date for p in date_polarities]
