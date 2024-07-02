@@ -183,6 +183,8 @@ class TradingPlatform(gym.Env):
         seed: int | None = None, options: dict[str, Any] | None = None,
     ) -> tuple[Dict[str, Any], dict[str, Any]]:
         super().reset(seed=seed, options=options)
+        if self.is_training:
+            self._asset_pool.renew_assets()
         self._asset_symbol, self._date_range = self._asset_pool.choose_asset_date(
             randomizing_start=self.is_training, target_polarity_diff=-self._polarity_diff,
         )
@@ -291,7 +293,7 @@ class TradingPlatform(gym.Env):
         excluding_historical: bool = True,
     ):
         self._asset_pool.apply_date_range_matcher(
-            self._max_steps_num, self._historical_days_num, date_range,
+            date_range, self._historical_days_num, self._max_steps_num,
             excluding_historical=excluding_historical,
         )
 
