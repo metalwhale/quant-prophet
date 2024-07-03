@@ -17,7 +17,7 @@ class Zigzag(DailyAsset):
     _published_price: float
     _trend_type_weights: Tuple[float, float]  # (UP, DOWN)
     _trend_period_range: Tuple[int, int]
-    _trend_movement_magnitude_range: Tuple[float, float]  # Positive ratio, exclusive end
+    _trend_movement_dist: Tuple[float, float]  # Positive mean and standard deviation
     _fluctuation_range: Tuple[float, float]  # Ratio, exclusive end
 
     _MA_WINDOW_RANGE: Tuple[int, int] = (5, 20)  # TODO: Choose a better window length
@@ -29,13 +29,13 @@ class Zigzag(DailyAsset):
         published_price: float,
         trend_type_weights: Tuple[float, float],
         trend_period_range: Tuple[int, int],
-        trend_movement_magnitude_range: Tuple[float, float],
+        trend_movement_dist: Tuple[float, float],
         fluctuation_range: Tuple[float, float],
     ) -> None:
         super().__init__(symbol)
         if (
             (trend_period_range[0] > trend_period_range[1] or trend_period_range[0] < 0)
-            or (trend_movement_magnitude_range[0] < 0 or trend_movement_magnitude_range[1] < 0)
+            or (trend_movement_dist[0] < 0 or trend_movement_dist[1] < 0)
             or (fluctuation_range[0] > 0 or fluctuation_range[1] < 0)
         ):
             raise ValueError
@@ -43,7 +43,7 @@ class Zigzag(DailyAsset):
         self._published_price = published_price
         self._trend_type_weights = trend_type_weights
         self._trend_period_range = trend_period_range
-        self._trend_movement_magnitude_range = trend_movement_magnitude_range
+        self._trend_movement_dist = trend_movement_dist
         self._fluctuation_range = fluctuation_range
         self._initialize()  # For fetching candles
 
@@ -64,7 +64,7 @@ class Zigzag(DailyAsset):
                 # Number of days for next trend
                 trend_days = np.random.randint(*self._trend_period_range)
                 # Movement for next trend
-                movement_magnitude_ratio = trend_days * np.random.uniform(*self._trend_movement_magnitude_range)
+                movement_magnitude_ratio = trend_days * max(0, np.random.normal(*self._trend_movement_dist))
                 movement_ratio = 1.0 + (1 if trend_type == TrendType.UP else -1) * movement_magnitude_ratio
                 # Move to next trend
                 trend_start_date = trend_end_date

@@ -264,6 +264,7 @@ class TradingPlatform(gym.Env):
             return
         # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
         # `num=1` is reserved for trading chart
+        plt.rcParams.update({"font.size": 8})
         figure = plt.figure(figsize=(10, 6 if self.is_training else 3), dpi=800, num=1, clear=True)
         figure.subplots_adjust(left=0.05, bottom=0.1, right=0.95, top=0.9)
         # Plot prices and positions
