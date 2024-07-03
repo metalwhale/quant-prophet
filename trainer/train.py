@@ -78,7 +78,7 @@ def generate_zigzag_assets(assets_num: int) -> List[Zigzag]:
             datetime.datetime.now().strftime("%Y%m%d%H%M%S") + "_"
             + "".join(np.random.choice([*(string.ascii_letters + string.digits)], size=4)),
             ZIGZAG_PUBLISHED_DATE, np.random.uniform(0, 100),
-            (0.55, 0.45), (2, 6), (0.0, 0.01), (-0.02, 0.02),
+            (0.55, 0.45), (2, 6), (0.0025, 0.005), (-0.02, 0.02),
         )
         for _ in range(assets_num)
     ]
