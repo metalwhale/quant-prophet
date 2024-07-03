@@ -69,11 +69,11 @@ class AssetPool:
         self._secondary_asset_generator = secondary_asset_generator
         self._polarity_temperature = polarity_temperature
 
-    def apply_date_range_matcher(
+    def apply_date_range(
         self,
         date_range: Tuple[Optional[datetime.date], Optional[datetime.date]],
         historical_days_num: int,
-        ahead_days_num: int,
+        ahead_days_num: int = 0,
         excluding_historical: bool = True,
     ):
         self._date_range = date_range
