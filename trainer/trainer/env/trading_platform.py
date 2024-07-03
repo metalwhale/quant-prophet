@@ -293,16 +293,6 @@ class TradingPlatform(gym.Env):
             .reshape(figure.canvas.get_width_height()[::-1] + (3,))
         return image
 
-    def apply_date_range(
-        self,
-        date_range: Tuple[Optional[datetime.date], Optional[datetime.date]],
-        excluding_historical: bool = True,
-    ):
-        self._asset_pool.apply_date_range_matcher(
-            date_range, self._historical_days_num, self._max_steps_num,
-            excluding_historical=excluding_historical,
-        )
-
     def refresh(self):
         self._polarity_diff = 0
         self._date_chosen_counter = defaultdict(lambda: defaultdict(int))
