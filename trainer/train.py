@@ -25,30 +25,6 @@ STOCK_SYMBOLS = ["AAPL"]
 ZIGZAG_PUBLISHED_DATE = datetime.datetime.strptime("2000-01-01", "%Y-%m-%d").date()
 
 
-def generate_stock_assets() -> List[Stock]:
-    assets = [
-        Stock(
-            symbol, Path(__file__).parent.parent / "data" / "stock" / "input" / "us",
-            max_days_num=STOCK_MAX_DAYS_NUM,
-        )
-        for symbol in STOCK_SYMBOLS
-    ]
-    return assets
-
-
-def generate_zigzag_assets(assets_num: int) -> List[Zigzag]:
-    assets = [
-        Zigzag(
-            datetime.datetime.now().strftime("%Y%m%d%H%M%S") + "_"
-            + "".join(np.random.choice([*(string.ascii_letters + string.digits)], size=4)),
-            ZIGZAG_PUBLISHED_DATE, np.random.uniform(0, 100),
-            (0.55, 0.45), (2, 6), (0.0, 0.01), (-0.02, 0.02),
-        )
-        for _ in range(assets_num)
-    ]
-    return assets
-
-
 def generate_envs(
     train_asset_pool_generator: Callable[[], AssetPool],
     val_asset_pool_generator: Callable[[], AssetPool],
@@ -85,16 +61,61 @@ def generate_envs(
     return train_env, {"train": rep_train_env, "val": val_env, "test": test_env}
 
 
-if __name__ == "__main__":
-    train_env, eval_envs = generate_envs(
+def generate_stock_assets(stock_symbols: List[str]) -> List[Stock]:
+    assets = [
+        Stock(
+            symbol, Path(__file__).parent.parent / "data" / "stock" / "input" / "us",
+            max_days_num=STOCK_MAX_DAYS_NUM,
+        )
+        for symbol in stock_symbols
+    ]
+    return assets
+
+
+def generate_zigzag_assets(assets_num: int) -> List[Zigzag]:
+    assets = [
+        Zigzag(
+            datetime.datetime.now().strftime("%Y%m%d%H%M%S") + "_"
+            + "".join(np.random.choice([*(string.ascii_letters + string.digits)], size=4)),
+            ZIGZAG_PUBLISHED_DATE, np.random.uniform(0, 100),
+            (0.55, 0.45), (2, 6), (0.0, 0.01), (-0.02, 0.02),
+        )
+        for _ in range(assets_num)
+    ]
+    return assets
+
+
+def generate_stock_envs() -> Tuple[TradingPlatform, Dict[str, TradingPlatform]]:
+    return generate_envs(
+        lambda: AssetPool(
+            generate_stock_assets(STOCK_SYMBOLS),
+            secondary_asset_generator=lambda: generate_zigzag_assets(1),
+            polarity_temperature=5.0,
+        ),
+        lambda: AssetPool(generate_stock_assets(STOCK_SYMBOLS)),
+        lambda: AssetPool(generate_stock_assets(STOCK_SYMBOLS)),
+    )
+
+
+def generate_zigzag_envs() -> Tuple[TradingPlatform, Dict[str, TradingPlatform]]:
+    return generate_envs(
         lambda: AssetPool(
             generate_zigzag_assets(5),
             secondary_asset_generator=lambda: generate_zigzag_assets(1),
             polarity_temperature=5.0,
         ),
-        lambda: AssetPool(generate_zigzag_assets(5), polarity_temperature=5.0),
-        lambda: AssetPool(generate_zigzag_assets(5), polarity_temperature=5.0),
+        lambda: AssetPool(generate_zigzag_assets(5)),
+        lambda: AssetPool(generate_zigzag_assets(5)),
     )
+
+
+def train(env_type: str):
+    train_env: TradingPlatform
+    eval_envs: Dict[str, TradingPlatform]
+    if env_type == "stock":
+        train_env, eval_envs = generate_stock_envs()
+    elif env_type == "zigzag":
+        train_env, eval_envs = generate_zigzag_envs()
     now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     model = DQN(
         "MultiInputPolicy", train_env,
@@ -104,7 +125,7 @@ if __name__ == "__main__":
     model.learn(
         total_timesteps=2000000,
         callback=FullEvalCallback(
-            Path(__file__).parent.parent / "data" / "zigzag" / "output" / now,
+            Path(__file__).parent.parent / "data" / env_type / "output" / now,
             eval_envs, 100,
             showing_image=False,
         ),
