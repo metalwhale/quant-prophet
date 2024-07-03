@@ -42,13 +42,20 @@ class DailyIndicator:
     _date: datetime.date
     _price_range: Tuple[float, float]
     _price: float   # Close price or a random value between low price and high price
-    _ema: float
+    _fast_ema: float
+    _slow_ema: float
 
-    def __init__(self, date: datetime.date, price_range: Tuple[float, float], price: float, ema: float) -> None:
+    def __init__(
+        self,
+        date: datetime.date,
+        price_range: Tuple[float, float], price: float,
+        fast_ema: float, slow_ema: float,
+    ) -> None:
         self._date = date
         self._price_range = price_range
         self._price = price
-        self._ema = ema
+        self._fast_ema = fast_ema
+        self._slow_ema = slow_ema
 
     @property
     def date(self) -> datetime.date:
@@ -63,8 +70,12 @@ class DailyIndicator:
         return self._price
 
     @property
-    def ema(self) -> float:
-        return self._ema
+    def fast_ema(self) -> float:
+        return self._fast_ema
+
+    @property
+    def slow_ema(self) -> float:
+        return self._slow_ema
 
 
 class DailyPrice:
@@ -73,17 +84,19 @@ class DailyPrice:
     _price_delta: float  # Change in price expressed as a ratio compared to the previous day
     _ema_delta: float  # Change in ema expressed as a ratio compared to the previous day
     _ema_price_diff: float  # Difference in ratio between ema and price
+    _ema_diff: float  # Difference in ratio between ema fast-length and slow-length
 
     def __init__(
         self,
         date: datetime.date, actual_price: float,
-        price_delta: float, ema_delta: float, ema_price_diff: float,
+        price_delta: float, ema_delta: float, ema_price_diff: float, ema_diff: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
         self._price_delta = price_delta
         self._ema_delta = ema_delta
         self._ema_price_diff = ema_price_diff
+        self._ema_diff = ema_diff
 
     @property
     def date(self) -> datetime.date:
@@ -105,6 +118,10 @@ class DailyPrice:
     def ema_price_diff(self) -> float:
         return self._ema_price_diff
 
+    @property
+    def ema_diff(self) -> float:
+        return self._ema_diff
+
 
 class DailyAsset(ABC):
     __symbol: str
@@ -112,9 +129,10 @@ class DailyAsset(ABC):
     __indicators: List[DailyIndicator]
     __date_indices: Dict[str, int]
 
-    __DELTA_DISTANCE = 1
-    __EMA_LENGTH = 20  # TODO: Choose a better length
     # NOTE: When adding a new parameter for calculating indicators, remember to modify `calc_buffer_days_num` method
+    __FAST_EMA_LENGTH = 5  # TODO: Choose a better length
+    __SLOW_EMA_LENGTH = 20  # TODO: Choose a better length (longer than fast-length)
+    __DELTA_DISTANCE = 1
 
     __DATE_FORMAT = "%Y-%m-%d"
 
@@ -166,7 +184,8 @@ class DailyAsset(ABC):
 
     def prepare_indicators(self, close_random_radius: Optional[int] = None):
         self.__indicators = []
-        prev_ema: Optional[float] = None
+        prev_fast_ema: Optional[float] = None
+        prev_slow_ema: Optional[float] = None
         for i, candle in enumerate(self.__candles):
             low = candle.low
             high = candle.high
@@ -183,9 +202,11 @@ class DailyAsset(ABC):
                     high = max(high, self.__candles[j].high)
                 price = np.random.uniform(low, high)
             # See: https://en.wikipedia.org/wiki/Exponential_smoothing
-            ema = self.__calc_ema(price, prev_ema)
-            self.__indicators.append(DailyIndicator(candle.date, (low, high), price, ema))
-            prev_ema = ema
+            fast_ema = calc_ema(price, prev_fast_ema, self.__FAST_EMA_LENGTH)
+            slow_ema = calc_ema(price, prev_slow_ema, self.__SLOW_EMA_LENGTH)
+            self.__indicators.append(DailyIndicator(candle.date, (low, high), price, fast_ema, slow_ema))
+            prev_fast_ema = fast_ema
+            prev_slow_ema = slow_ema
 
     # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
     # The actual price used is usually the close price, except for end date,
@@ -208,8 +229,9 @@ class DailyAsset(ABC):
                 self.__indicators[i].date,
                 self.__indicators[i].price,
                 self.__indicators[i].price / self.__indicators[i - self.__DELTA_DISTANCE].price - 1,
-                self.__indicators[i].ema / self.__indicators[i - self.__DELTA_DISTANCE].ema - 1,
-                self.__indicators[i].ema / self.__indicators[i].price - 1,
+                self.__indicators[i].slow_ema / self.__indicators[i - self.__DELTA_DISTANCE].slow_ema - 1,
+                self.__indicators[i].price / self.__indicators[i].slow_ema - 1,
+                self.__indicators[i].fast_ema / self.__indicators[i].slow_ema - 1,
             ))
         # Price for `end_date`
         end_date_price = 0.0
@@ -217,23 +239,32 @@ class DailyAsset(ABC):
             end_date_price = np.random.uniform(*end_indicator.price_range)
         else:
             end_date_price = end_indicator.price
-        end_date_ema = self.__calc_ema(end_date_price, self.__indicators[end_date_index - 1].ema)
+        end_date_fast_ema = calc_ema(
+            end_date_price, self.__indicators[end_date_index - 1].fast_ema,
+            self.__FAST_EMA_LENGTH,
+        )
+        end_date_slow_ema = calc_ema(
+            end_date_price, self.__indicators[end_date_index - 1].slow_ema,
+            self.__SLOW_EMA_LENGTH,
+        )
         prices.append(DailyPrice(
             end_indicator.date,
             end_date_price,
             end_date_price / self.__indicators[end_date_index - self.__DELTA_DISTANCE].price - 1,
-            end_date_ema / self.__indicators[end_date_index - self.__DELTA_DISTANCE].ema - 1,
-            end_date_ema / end_date_price - 1,
+            end_date_slow_ema / self.__indicators[end_date_index - self.__DELTA_DISTANCE].slow_ema - 1,
+            end_date_price / end_date_slow_ema - 1,
+            end_date_fast_ema / end_date_slow_ema - 1,
         ))
         return prices
 
     @classmethod
     def calc_buffer_days_num(cls) -> int:
-        # TODO: Add more buffer for EMA
-        return max(
-            cls.__DELTA_DISTANCE,  # For price deltas (`DailyPrice.price_delta`)
-            cls.__EMA_LENGTH + cls.__DELTA_DISTANCE,  # For ema deltas (`DailyPrice.ema_delta`)
-            cls.__EMA_LENGTH,  # For ema-price diffs (`DailyPrice.ema_price_diff`)
+        # TODO: Add more buffer for EMAs
+        return (
+            # For `DailyIndicator` EMAs
+            max(cls.__FAST_EMA_LENGTH, cls.__SLOW_EMA_LENGTH)
+            # For `DailyPrice` deltas
+            + cls.__DELTA_DISTANCE
         )
 
     @property
@@ -257,10 +288,10 @@ class DailyAsset(ABC):
     def __get_date_index(self, date: datetime.date) -> Optional[int]:
         return self.__date_indices.get(date.strftime(self.__DATE_FORMAT))
 
-    @classmethod
-    def __calc_ema(cls, price: float, prev_ema: Optional[float]) -> float:
-        if prev_ema is None:
-            prev_ema = price
-        ema_smoothing_factor = 2 / (cls.__EMA_LENGTH + 1)  # See: https://www.investopedia.com/terms/e/ema.asp
-        ema = ema_smoothing_factor * price + (1 - ema_smoothing_factor) * prev_ema
-        return ema
+
+def calc_ema(price: float, prev_ema: Optional[float], length: int) -> float:
+    if prev_ema is None:
+        prev_ema = price
+    ema_smoothing_factor = 2 / (length + 1)  # See: https://www.investopedia.com/terms/e/ema.asp
+    ema = ema_smoothing_factor * price + (1 - ema_smoothing_factor) * prev_ema
+    return ema

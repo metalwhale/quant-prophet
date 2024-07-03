@@ -170,8 +170,7 @@ class TradingPlatform(gym.Env):
         self.observation_space = gym.spaces.Dict({
             # Suppose that delta values (ratios) are greater than -1 and less than 1,
             # meaning prices and other indicators never drop to 0 and never double from previous day.
-            "historical_price_deltas": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
-            "historical_ema_price_diffs": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            "historical_ema_diffs": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             # Position types have the same values as action space.
             "position_type": gym.spaces.Discrete(len(PositionType)),
         })
@@ -331,8 +330,7 @@ class TradingPlatform(gym.Env):
     def _obtain_observation(self) -> Dict[str, Any]:
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
-            "historical_price_deltas": np.array(self._minmax_scale([p.price_delta for p in self._prices])),
-            "historical_ema_price_diffs": np.array(self._minmax_scale([p.ema_price_diff for p in self._prices])),
+            "historical_ema_diffs": np.array(self._minmax_scale([p.ema_diff for p in self._prices])),
             "position_type": np.array([self._positions[-1].position_type], dtype=int),
         }
 
