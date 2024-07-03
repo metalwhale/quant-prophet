@@ -134,7 +134,7 @@ def trade(
         if model is not None:
             action, _ = model.predict(obs, deterministic=True)
         else:
-            action = int(np.random.choice([PositionType.LONG, PositionType.SHORT]))
+            action = int(np.random.choice([PositionType.BUY, PositionType.SELL]))
         obs, _, terminated, truncated, info = env.step(action)
         is_end_of_date = info["is_end_of_date"]
         logging.debug("%s %f %f", env._prices[-1].date, env._prices[-1].actual_price, env._balance)

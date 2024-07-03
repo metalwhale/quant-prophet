@@ -13,8 +13,8 @@ from .asset_pool import AssetPool, calc_polarity_diff
 
 
 class PositionType(IntEnum):
-    LONG = 0
-    SHORT = 1
+    BUY = 0
+    SELL = 1
 
 
 class Position:
@@ -197,7 +197,7 @@ class TradingPlatform(gym.Env):
         self._date_index = 0
         self._retrieve_prices()
         self._positions = [Position(
-            self._prices[-1].date, self.np_random.choice([PositionType.LONG, PositionType.SHORT]),
+            self._prices[-1].date, self.np_random.choice([PositionType.BUY, PositionType.SELL]),
             self._prices[-1].actual_price, self._position_amount,
         )]  # First position
         self._balance = self._initial_balance
@@ -278,10 +278,10 @@ class TradingPlatform(gym.Env):
         dates = [p.date for p in prices]
         axes.plot(dates, [p.actual_price for p in prices], color="gray", linewidth=0.5)
         for position in self._positions:
-            is_long = position.position_type == PositionType.LONG
+            is_buy = position.position_type == PositionType.BUY
             axes.plot(
                 position.date, position.entry_price,
-                color="green" if is_long else "red", marker="o", markersize=0.5,
+                color="green" if is_buy else "red", marker="o", markersize=0.5,
             )
         # Plot date counter
         if self.is_training:
@@ -345,7 +345,7 @@ class TradingPlatform(gym.Env):
 
 
 def calc_position_net_ratio(position: Position, actual_price: float) -> float:
-    return (actual_price / position.entry_price - 1) * (1 if position.position_type == PositionType.LONG else -1)
+    return (actual_price / position.entry_price - 1) * (1 if position.position_type == PositionType.BUY else -1)
 
 
 def calc_earning(
@@ -372,6 +372,6 @@ def calc_earning(
     earning += (final_price.date - positions[-1].date).days * positions[-1].amount * -position_holding_daily_fee
     earning += positions[-1].amount * calc_position_net_ratio(positions[-1], final_price.actual_price)
     logging.debug("%s %f %s", positions[-1].date, positions[-1].entry_price, positions[-1].position_type)
-    # Actual price change equals a LONG position, hence `1` instead of `-1`
+    # Actual price change equals a BUY position, hence `1` instead of `-1`
     actual_price_change = (final_price.actual_price / positions[0].entry_price - 1) * 1 * positions[0].amount
     return earning, actual_price_change
