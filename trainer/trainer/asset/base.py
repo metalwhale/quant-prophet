@@ -113,7 +113,7 @@ class DailyAsset(ABC):
     __date_indices: Dict[str, int]
 
     __DELTA_DISTANCE = 1
-    __EMA_WINDOW = 20  # TODO: Choose a better window length
+    __EMA_LENGTH = 20  # TODO: Choose a better length
     # NOTE: When adding a new parameter for calculating indicators, remember to modify `calc_buffer_days_num` method
 
     __DATE_FORMAT = "%Y-%m-%d"
@@ -232,8 +232,8 @@ class DailyAsset(ABC):
         # TODO: Add more buffer for EMA
         return max(
             cls.__DELTA_DISTANCE,  # For price deltas (`DailyPrice.price_delta`)
-            cls.__EMA_WINDOW + cls.__DELTA_DISTANCE,  # For ema deltas (`DailyPrice.ema_delta`)
-            cls.__EMA_WINDOW,  # For ema-price diffs (`DailyPrice.ema_price_diff`)
+            cls.__EMA_LENGTH + cls.__DELTA_DISTANCE,  # For ema deltas (`DailyPrice.ema_delta`)
+            cls.__EMA_LENGTH,  # For ema-price diffs (`DailyPrice.ema_price_diff`)
         )
 
     @property
@@ -261,6 +261,6 @@ class DailyAsset(ABC):
     def __calc_ema(cls, price: float, prev_ema: Optional[float]) -> float:
         if prev_ema is None:
             prev_ema = price
-        ema_smoothing_factor = 2 / (cls.__EMA_WINDOW + 1)  # See: https://www.investopedia.com/terms/e/ema.asp
+        ema_smoothing_factor = 2 / (cls.__EMA_LENGTH + 1)  # See: https://www.investopedia.com/terms/e/ema.asp
         ema = ema_smoothing_factor * price + (1 - ema_smoothing_factor) * prev_ema
         return ema

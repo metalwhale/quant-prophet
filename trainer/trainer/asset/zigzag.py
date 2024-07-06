@@ -20,7 +20,7 @@ class Zigzag(DailyAsset):
     _trend_movement_dist: Tuple[float, float]  # Positive mean and standard deviation
     _fluctuation_range: Tuple[float, float]  # Ratio, exclusive end
 
-    _MA_WINDOW_RANGE: Tuple[int, int] = (5, 20)  # TODO: Choose a better window length
+    _MA_LENGTH_RANGE: Tuple[int, int] = (5, 20)  # TODO: Choose a better length
 
     def __init__(
         self,
@@ -85,7 +85,7 @@ class Zigzag(DailyAsset):
         candles: List[DailyCandle] = []
         for date, price in zip(
             [d for d, _ in raw_prices],
-            smoothen([p for _, p in raw_prices], np.random.randint(*self._MA_WINDOW_RANGE)),
+            smoothen([p for _, p in raw_prices], np.random.randint(*self._MA_LENGTH_RANGE)),
         ):
             high = price * (1 + np.random.uniform(0, self._fluctuation_range[1]))
             low = price * (1 + np.random.uniform(self._fluctuation_range[0], 0))
@@ -94,8 +94,8 @@ class Zigzag(DailyAsset):
         return candles
 
 
-def smoothen(array: List[float], ma_window: int) -> List[float]:
+def smoothen(array: List[float], ma_length: int) -> List[float]:
     # See: https://stackoverflow.com/a/34387987
     array = np.cumsum(np.insert(array, 0, 0))
-    smooth_array = (array[ma_window:] - array[:-ma_window]) / ma_window
+    smooth_array = (array[ma_length:] - array[:-ma_length]) / ma_length
     return smooth_array
