@@ -15,10 +15,12 @@ from trainer.env.evaluation import FullEvalCallback
 
 MONTHLY_TRADABLE_DAYS_NUM = 20
 YEARLY_TRADABLE_DAYS_NUM = 250
+INTEREST_RATE = 0.2  # 20% each year
 LAST_TRAINING_DATE = datetime.datetime.strptime("2019-12-31", "%Y-%m-%d").date()
 LAST_VALIDATION_DATE = datetime.datetime.strptime("2022-12-31", "%Y-%m-%d").date()
 HISTORICAL_DAYS_NUM = MONTHLY_TRADABLE_DAYS_NUM * 6
-POSITION_OPENING_PENALTY = 0.01
+POSITION_OPENING_PENALTY = 0.0
+POSITION_HOLDING_DAILY_FEE = INTEREST_RATE / YEARLY_TRADABLE_DAYS_NUM
 
 STOCK_MAX_DAYS_NUM = None  # YEARLY_TRADABLE_DAYS_NUM * 20
 STOCK_SYMBOLS = ["AAPL"]
@@ -38,13 +40,13 @@ def generate_envs(
     )
     train_env = TradingPlatform(
         train_asset_pool, HISTORICAL_DAYS_NUM,
-        position_opening_penalty=POSITION_OPENING_PENALTY,
+        position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
         max_balance_loss=1.0, max_balance_gain=0.5, max_positions_num=50, max_steps_num=YEARLY_TRADABLE_DAYS_NUM,
     )
     train_env.is_training = True
     rep_train_env = TradingPlatform(
         train_asset_pool, HISTORICAL_DAYS_NUM,
-        position_opening_penalty=POSITION_OPENING_PENALTY,
+        position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
     )
     rep_train_env.is_training = False
     # Validation environment
@@ -55,7 +57,7 @@ def generate_envs(
     )
     val_env = TradingPlatform(
         val_asset_pool, HISTORICAL_DAYS_NUM,
-        position_opening_penalty=POSITION_OPENING_PENALTY,
+        position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
     )
     val_env.is_training = False
     # Test environment
@@ -66,7 +68,7 @@ def generate_envs(
     )
     test_env = TradingPlatform(
         test_asset_pool, HISTORICAL_DAYS_NUM,
-        position_opening_penalty=POSITION_OPENING_PENALTY,
+        position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
     )
     test_env.is_training = False
     return train_env, {"train": rep_train_env, "val": val_env, "test": test_env}

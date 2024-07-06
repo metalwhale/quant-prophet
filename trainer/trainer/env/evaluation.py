@@ -134,7 +134,7 @@ def trade(
         if model is not None:
             action, _ = model.predict(obs, deterministic=True)
         else:
-            action = int(np.random.choice([PositionType.BUY, PositionType.SELL]))
+            action = int(np.random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL]))
         obs, _, terminated, truncated, info = env.step(action)
         is_end_of_date = info["is_end_of_date"]
         logging.debug("%s %f %f", env._prices[-1].date, env._prices[-1].actual_price, env._balance)
@@ -146,7 +146,10 @@ def trade(
     self_calculated_balance = env._initial_balance
     earning, actual_price_change = calc_earning(
         env._positions, env._prices[-1],
+        # TODO: Include fees even if not in training mode
+        position_holding_daily_fee=env._position_holding_daily_fee if env.is_training else 0,
         position_opening_penalty=env._position_opening_penalty if env.is_training else 0,
+        short_period_penalty=env._short_period_penalty if env.is_training else 0,
     )
     self_calculated_balance += earning
     logging.debug("%s %f", env._prices[-1].date, env._prices[-1].actual_price)

@@ -13,8 +13,9 @@ from .asset_pool import AssetPool, calc_polarity_diff
 
 
 class PositionType(IntEnum):
-    BUY = 0
-    SELL = 1
+    SIDELINE = 0
+    BUY = 1
+    SELL = 2
 
 
 class Position:
@@ -104,7 +105,7 @@ class TradingPlatform(gym.Env):
     # TODO: Reconsider the meaning of the daily fee.
     # Its sole purpose currently seems to be only preventing holding a position too long, causing a loss before earning.
     # Does it still make sense since we are always holding every day?
-    _position_holding_daily_fee: float = 0.0  # Positive ratio (UNUSED)
+    _position_holding_daily_fee: float  # Positive ratio
     # TODO: Reconsider the meaning of the opening penalty.
     # I believe that changing the opening penalty affects how often new positions are opened,
     # i.e., increasing the opening penalty means the model may learn to open fewer positions.
@@ -142,6 +143,7 @@ class TradingPlatform(gym.Env):
         self,
         asset_pool: AssetPool,
         historical_days_num: int,
+        position_holding_daily_fee: float = 0.0,
         position_opening_penalty: float = 0.0,
         max_balance_loss: float = 0.0,
         max_balance_gain: float = 0.0,
@@ -155,6 +157,7 @@ class TradingPlatform(gym.Env):
         self._historical_days_num = historical_days_num
         # These following hyperparameters are mainly used only for training,
         # by calculating reward and determining whether to terminate an episode.
+        self._position_holding_daily_fee = position_holding_daily_fee
         self._position_opening_penalty = position_opening_penalty
         self._max_balance_loss = max_balance_loss
         self._max_balance_gain = max_balance_gain
@@ -171,8 +174,6 @@ class TradingPlatform(gym.Env):
             # Suppose that delta values (ratios) are greater than -1 and less than 1,
             # meaning prices and other indicators never drop to 0 and never double from previous day.
             "historical_ema_diffs": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
-            # Position types have the same values as action space.
-            "position_type": gym.spaces.Discrete(len(PositionType)),
         })
         # Refresh platform-level state components
         self.refresh()
@@ -196,11 +197,12 @@ class TradingPlatform(gym.Env):
         self._date_index = 0
         self._retrieve_prices()
         self._positions = [Position(
-            self._prices[-1].date, self.np_random.choice([PositionType.BUY, PositionType.SELL]),
+            self._prices[-1].date, self.np_random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL]),
             self._prices[-1].actual_price, self._position_amount,
         )]  # First position
         self._balance = self._initial_balance
-        self._balance += self._positions[-1].amount * -self._position_opening_penalty  # Opening penalty
+        if self._positions[-1].position_type != PositionType.SIDELINE:
+            self._balance += self._positions[-1].amount * -self._position_opening_penalty  # Opening penalty
         observation = self._obtain_observation()
         info = {}
         if self.is_training:
@@ -217,17 +219,20 @@ class TradingPlatform(gym.Env):
         self._date_index += 1
         self._retrieve_prices()
         reward += self._positions[-1].amount * self._last_position_net_ratio  # Position's net of the current date
-        reward += self._positions[-1].amount * -self._position_holding_daily_fee  # Holding fee
+        if self._positions[-1].position_type != PositionType.SIDELINE:
+            reward += self._positions[-1].amount * -self._position_holding_daily_fee  # Holding fee
         # If the position type changes, close the current position and open a new one
         if action != int(self._positions[-1].position_type):
-            # Penalize if the previous position is held for too short a period
-            reward += self._positions[-1].amount \
-                * -self._short_period_penalty / (self._prices[-1].date - self._positions[-1].date).days
+            if self._positions[-1].position_type != PositionType.SIDELINE:
+                # Penalize if the previous position is held for too short a period
+                reward += self._positions[-1].amount \
+                    * -self._short_period_penalty / (self._prices[-1].date - self._positions[-1].date).days
             self._positions.append(Position(
                 self._prices[-1].date, PositionType(action),
                 self._prices[-1].actual_price, self._position_amount,
             ))
-            reward += self._positions[-1].amount * -self._position_opening_penalty  # Opening penalty
+            if action != int(PositionType.SIDELINE):
+                reward += self._positions[-1].amount * -self._position_opening_penalty  # Opening penalty
         # Treat the balance as a cumulative reward in each episode
         self._balance += reward
         # Read more about termination and truncation at:
@@ -274,15 +279,42 @@ class TradingPlatform(gym.Env):
             self._date_index + self._historical_days_num,
             randomizing_end=self.is_training,
         )
-        dates = [p.date for p in prices]
-        axes.plot(dates, [p.actual_price for p in prices], color="gray", linewidth=0.5)
-        for position in self._positions:
-            is_buy = position.position_type == PositionType.BUY
-            axes.plot(
-                position.date, position.entry_price,
-                color="green" if is_buy else "red", marker="o", markersize=0.5,
-            )
+        position_index: Optional[int] = None
+        date_prices: List[Tuple[datetime.date, float]] = []
+        for i, price in enumerate(prices):
+            next_position_index = 0 if position_index is None else position_index + 1
+            date_price = (price.date, price.actual_price)  # Use actual price and ignore position's entry price
+            date_prices.append(date_price)
+            if (
+                # Position type changes
+                (len(self._positions) > next_position_index and price.date == self._positions[next_position_index].date)
+                # Last price
+                or (i == len(prices) - 1)
+            ):
+                # Plot dates and prices for current position
+                if len(date_prices) > 0:
+                    position_type: PositionType
+                    if position_index is None:
+                        # The days before first position
+                        position_type = PositionType.SIDELINE
+                    else:
+                        position_type = self._positions[position_index].position_type
+                    color: str
+                    if position_type == PositionType.SIDELINE:
+                        color = "gray"
+                    elif position_type == PositionType.BUY:
+                        color = "green"
+                    elif position_type == PositionType.SELL:
+                        color = "red"
+                    else:
+                        color = "black"  # Placeholder
+                    axes.plot([d for d, _ in date_prices], [p for _, p in date_prices], color=color, linewidth=0.5)
+                    axes.plot(*date_prices[0], color=color, marker="o", markersize=0.5)
+                # Move to next position
+                position_index = next_position_index
+                date_prices = [date_price]
         # Plot date counter
+        dates = [p.date for p in prices]
         if self.is_training:
             axes = figure.add_subplot(212)
             axes.bar(dates, [sum(self._date_chosen_counter[d].values()) for d in dates])
@@ -331,7 +363,6 @@ class TradingPlatform(gym.Env):
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_ema_diffs": np.array(self._minmax_scale([p.ema_diff for p in self._prices])),
-            "position_type": np.array([self._positions[-1].position_type], dtype=int),
         }
 
     @staticmethod
@@ -343,7 +374,11 @@ class TradingPlatform(gym.Env):
 
 
 def calc_position_net_ratio(position: Position, actual_price: float) -> float:
-    return (actual_price / position.entry_price - 1) * (1 if position.position_type == PositionType.BUY else -1)
+    position_type = position.position_type
+    if position_type == PositionType.SIDELINE:
+        return 0
+    else:
+        return (actual_price / position.entry_price - 1) * (1 if position_type == PositionType.BUY else -1)
 
 
 def calc_earning(
@@ -357,18 +392,21 @@ def calc_earning(
     for prev_position, cur_position in zip(positions[:-1], positions[1:]):
         # Position net
         earning += prev_position.amount * calc_position_net_ratio(prev_position, cur_position.entry_price)
-        # Holding fee
-        earning += (cur_position.date - prev_position.date).days * prev_position.amount * -position_holding_daily_fee
-        # TODO: Skip calculating penalties when evaluating
-        # Opening penalty
-        earning += prev_position.amount * -position_opening_penalty
-        # Short-period penalty
-        earning += prev_position.amount * -short_period_penalty / (cur_position.date - prev_position.date).days
+        if prev_position.position_type != PositionType.SIDELINE:
+            # Holding fee
+            earning += (cur_position.date - prev_position.date).days \
+                * prev_position.amount * -position_holding_daily_fee
+            # TODO: Skip calculating penalties when evaluating
+            # Opening penalty
+            earning += prev_position.amount * -position_opening_penalty
+            # Short-period penalty
+            earning += prev_position.amount * -short_period_penalty / (cur_position.date - prev_position.date).days
         logging.debug("%s %f %s", prev_position.date, prev_position.entry_price, prev_position.position_type)
     # Reward of the last position
-    earning += positions[-1].amount * -position_opening_penalty
-    earning += (final_price.date - positions[-1].date).days * positions[-1].amount * -position_holding_daily_fee
     earning += positions[-1].amount * calc_position_net_ratio(positions[-1], final_price.actual_price)
+    if positions[-1].position_type != PositionType.SIDELINE:
+        earning += (final_price.date - positions[-1].date).days * positions[-1].amount * -position_holding_daily_fee
+        earning += positions[-1].amount * -position_opening_penalty
     logging.debug("%s %f %s", positions[-1].date, positions[-1].entry_price, positions[-1].position_type)
     # Actual price change equals a BUY position, hence `1` instead of `-1`
     actual_price_change = (final_price.actual_price / positions[0].entry_price - 1) * 1 * positions[0].amount
