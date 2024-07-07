@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from PIL import Image, ImageDraw
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
@@ -18,6 +19,7 @@ class FullEvalCallback(BaseCallback):
     _output_path: Path
     _envs: Dict[str, TradingPlatform]
     _freq: int
+    _action_diff_threshold: Optional[float]
     _showing_image: bool
 
     _ep_count: int
@@ -29,7 +31,7 @@ class FullEvalCallback(BaseCallback):
     def __init__(
         self,
         output_path: Path, envs: Dict[str, TradingPlatform], freq: int,
-        showing_image: bool = True,
+        action_diff_threshold: Optional[int] = None, showing_image: bool = True,
         verbose: int = 0,
     ):
         super().__init__(verbose)
@@ -37,6 +39,7 @@ class FullEvalCallback(BaseCallback):
         self._output_path = output_path
         self._envs = envs
         self._freq = freq
+        self._action_diff_threshold = action_diff_threshold
         self._showing_image = showing_image
         # Initialization
         os.makedirs(output_path, exist_ok=True)
@@ -68,7 +71,11 @@ class FullEvalCallback(BaseCallback):
                 rendered,
                 (_, earning, actual_price_change),
                 (positions, last_price),
-            ) = trade(env, model=self.model, stopping_when_done=False)
+            ) = trade(
+                env,
+                model=self.model,
+                action_diff_threshold=self._action_diff_threshold, stopping_when_done=False,
+            )
             # Write trade positions
             with open(self._output_path / f"trade_{self._ep_count}_{env_name}.csv", "w") as positions_file:
                 positions_writer = csv.DictWriter(positions_file, ["date", "entry_price", "position_type"])
@@ -141,7 +148,10 @@ class FullEvalCallback(BaseCallback):
 
 def trade(
     env: TradingPlatform,
-    model: Optional[BaseAlgorithm] = None, max_step: Optional[int] = None, stopping_when_done: bool = True,
+    model: Optional[BaseAlgorithm] = None,
+    action_diff_threshold: Optional[float] = None,
+    max_step: Optional[int] = None,
+    stopping_when_done: bool = True,
     rendering: bool = True,
 ) -> Tuple[Any, Tuple[float, ...], Tuple[List[Position], DailyPrice]]:
     env.render_mode = "rgb_array"
@@ -149,10 +159,20 @@ def trade(
     # TODO: Avoid using private attributes
     # Run one episode
     step = 0
+    action = None
     while max_step is None or step < max_step:
-        action = None
         if model is not None:
-            action, _ = model.predict(obs, deterministic=True)
+            if action_diff_threshold is None:
+                action, _ = model.predict(obs, deterministic=True)
+            else:
+                model.policy.set_training_mode(False)
+                obs_tensor, _ = model.policy.obs_to_tensor(obs)
+                with torch.no_grad():
+                    q_values = model.policy.q_net(obs_tensor)
+                # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
+                v1, v2 = q_values.numpy()[0]
+                if abs(v1 / v2 - 1) >= action_diff_threshold or action is None:
+                    action = 0 if v1 > v2 else 1
         else:
             action = int(np.random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL]))
         obs, _, terminated, truncated, info = env.step(action)
