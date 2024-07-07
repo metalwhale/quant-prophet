@@ -10,7 +10,8 @@ from PIL import Image, ImageDraw
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 
-from .trading_platform import PositionType, TradingPlatform, calc_earning
+from ..asset.base import DailyPrice
+from .trading_platform import Position, PositionType, TradingPlatform, calc_earning
 
 
 class FullEvalCallback(BaseCallback):
@@ -20,10 +21,9 @@ class FullEvalCallback(BaseCallback):
     _showing_image: bool
 
     _ep_count: int
-    _log_field_names: List[str]
-    _log_records: List[Dict[str, Any]]
+    _overview_records: List[Dict[str, Any]]
 
-    _LOG_FILE_NAME = "log.csv"
+    _OVERVIEW_LOG_FILE_NAME = "overview.csv"
     _OVERVIEW_CHART_FILE_NAME = "overview.png"
 
     def __init__(
@@ -40,16 +40,8 @@ class FullEvalCallback(BaseCallback):
         self._showing_image = showing_image
         # Initialization
         os.makedirs(output_path, exist_ok=True)
-        self._log_field_names = [
-            "ep_count",
-            *[f for n in self._envs.keys() for f in [f"{n}_earning", f"{n}_earning_discrepancy"]],
-        ]
-        with open(self._output_path / self._LOG_FILE_NAME, "w") as log_file:
-            log_writer = csv.DictWriter(log_file, self._log_field_names)
-            log_writer.writeheader()
-            log_file.flush()
-        self._log_records = []
         self._ep_count = 0
+        self._overview_records = []
 
     def _on_training_start(self) -> None:
         self.__eval_model()
@@ -68,12 +60,29 @@ class FullEvalCallback(BaseCallback):
         return super()._on_training_end()
 
     def __eval_model(self):
-        # Write log file
         row: Dict[str, Any] = {"ep_count": self._ep_count}
         for env_name, env in self._envs.items():
             env.is_training = False  # Just in case
             # TODO: Iterate through all assets
-            rendered, (_, earning, actual_price_change) = trade(env, model=self.model, stopping_when_done=False)
+            (
+                rendered,
+                (_, earning, actual_price_change),
+                (positions, last_price),
+            ) = trade(env, model=self.model, stopping_when_done=False)
+            # Write trade positions
+            with open(self._output_path / f"trade_{self._ep_count}_{env_name}.csv", "w") as positions_file:
+                positions_writer = csv.DictWriter(positions_file, ["date", "entry_price", "position_type"])
+                for position in positions:
+                    positions_writer.writerow({
+                        "date": position.date,
+                        "entry_price": position.entry_price,
+                        "position_type": position.position_type.name,
+                    })
+                positions_writer.writerow({
+                    "date": last_price.date,
+                    "entry_price": last_price.actual_price,
+                })
+            # Draw trade chart
             image = Image.fromarray(rendered)
             draw = ImageDraw.Draw(image)
             draw.text((60, 60), f"Episode {self._ep_count}: " + ", ".join([
@@ -89,12 +98,23 @@ class FullEvalCallback(BaseCallback):
                 f"{env_name}_actual_price_change": actual_price_change,
                 f"{env_name}_earning_discrepancy": earning - actual_price_change,
             }
-        with open(self._output_path / self._LOG_FILE_NAME, "a") as log_file:
-            log_writer = csv.DictWriter(log_file, self._log_field_names)
-            log_writer.writerow({k: v for k, v in row.items() if k in self._log_field_names})
-            log_file.flush()
-        # Draw chart
-        self._log_records.append(row)
+        # Write overview log
+        overview_log_field_names = [
+            "ep_count",
+            *[f for n in self._envs.keys() for f in [f"{n}_earning", f"{n}_earning_discrepancy"]],
+        ]
+        overview_log_file_path = self._output_path / self._OVERVIEW_LOG_FILE_NAME
+        if not os.path.isfile(overview_log_file_path):
+            with open(self._output_path / self._OVERVIEW_LOG_FILE_NAME, "w") as overview_log_file:
+                overview_log_writer = csv.DictWriter(overview_log_file, overview_log_field_names)
+                overview_log_writer.writeheader()
+                overview_log_file.flush()
+        with open(overview_log_file_path, "a") as overview_log_file:
+            overview_log_writer = csv.DictWriter(overview_log_file, overview_log_field_names)
+            overview_log_writer.writerow({k: v for k, v in row.items() if k in overview_log_field_names})
+            overview_log_file.flush()
+        # Draw overview chart
+        self._overview_records.append(row)
         # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
         # `num=2` is reserved for overview chart
         figure = plt.figure(figsize=(10, 3 * len(self._envs)), dpi=800, num=2, clear=True)
@@ -102,13 +122,13 @@ class FullEvalCallback(BaseCallback):
         for i, env_name in enumerate(self._envs.keys()):
             axes = figure.add_subplot(len(self._envs), 1, i + 1)
             axes.plot(
-                [r["ep_count"] for r in self._log_records],
-                [r[f"{env_name}_actual_price_change"] for r in self._log_records],
+                [r["ep_count"] for r in self._overview_records],
+                [r[f"{env_name}_actual_price_change"] for r in self._overview_records],
                 color="gray",
             )
             axes.plot(
-                [r["ep_count"] for r in self._log_records],
-                [r[f"{env_name}_earning"] for r in self._log_records],
+                [r["ep_count"] for r in self._overview_records],
+                [r[f"{env_name}_earning"] for r in self._overview_records],
                 color="blue",
             )
         figure.canvas.draw()
@@ -123,7 +143,7 @@ def trade(
     env: TradingPlatform,
     model: Optional[BaseAlgorithm] = None, max_step: Optional[int] = None, stopping_when_done: bool = True,
     rendering: bool = True,
-) -> Tuple[Any, Tuple[float, ...]]:
+) -> Tuple[Any, Tuple[float, ...], Tuple[List[Position], DailyPrice]]:
     env.render_mode = "rgb_array"
     obs, _ = env.reset()
     # TODO: Avoid using private attributes
@@ -143,7 +163,7 @@ def trade(
         step += 1
     rendered = env.render() if rendering else None
     # Calculate the balance
-    self_calculated_balance = env._initial_balance
+    calculated_balance = env._initial_balance
     earning, actual_price_change = calc_earning(
         env._positions, env._prices[-1],
         # TODO: Include fees even if not in training mode
@@ -151,11 +171,15 @@ def trade(
         position_opening_penalty=env._position_opening_penalty if env.is_training else 0,
         short_period_penalty=env._short_period_penalty if env.is_training else 0,
     )
-    self_calculated_balance += earning
+    calculated_balance += earning
     logging.debug("%s %f", env._prices[-1].date, env._prices[-1].actual_price)
     platform_balance = env._balance
     # Platform balance and self-calculated balance should be equal
-    return rendered, (platform_balance, self_calculated_balance, actual_price_change)
+    return (
+        rendered,
+        (platform_balance, calculated_balance, actual_price_change),
+        (env._positions, env._prices[-1]),
+    )
 
 
 def show_image(image: Any):

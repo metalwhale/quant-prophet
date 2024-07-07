@@ -197,7 +197,8 @@ class TradingPlatform(gym.Env):
         self._date_index = 0
         self._retrieve_prices()
         self._positions = [Position(
-            self._prices[-1].date, self.np_random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL]),
+            self._prices[-1].date,
+            PositionType(self.np_random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL])),
             self._prices[-1].actual_price, self._position_amount,
         )]  # First position
         self._balance = self._initial_balance
@@ -228,7 +229,8 @@ class TradingPlatform(gym.Env):
                 reward += self._positions[-1].amount \
                     * -self._short_period_penalty / (self._prices[-1].date - self._positions[-1].date).days
             self._positions.append(Position(
-                self._prices[-1].date, PositionType(action),
+                self._prices[-1].date,
+                PositionType(action),
                 self._prices[-1].actual_price, self._position_amount,
             ))
             if action != int(PositionType.SIDELINE):
