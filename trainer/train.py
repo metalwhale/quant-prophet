@@ -15,12 +15,14 @@ from trainer.env.evaluation import FullEvalCallback
 
 MONTHLY_TRADABLE_DAYS_NUM = 20
 YEARLY_TRADABLE_DAYS_NUM = 250
-INTEREST_RATE = 0.2  # 20% each year
 LAST_TRAINING_DATE = datetime.datetime.strptime("2019-12-31", "%Y-%m-%d").date()
 LAST_VALIDATION_DATE = datetime.datetime.strptime("2022-12-31", "%Y-%m-%d").date()
 HISTORICAL_DAYS_NUM = MONTHLY_TRADABLE_DAYS_NUM * 6
-POSITION_OPENING_PENALTY = 0.0
+
+# LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
+INTEREST_RATE = 0.0  # Each year
 POSITION_HOLDING_DAILY_FEE = INTEREST_RATE / YEARLY_TRADABLE_DAYS_NUM
+POSITION_OPENING_PENALTY = 0.01
 
 STOCK_MAX_DAYS_NUM = None  # YEARLY_TRADABLE_DAYS_NUM * 20
 STOCK_SYMBOLS = ["AAPL"]
