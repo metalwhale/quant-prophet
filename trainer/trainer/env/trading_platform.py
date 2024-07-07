@@ -13,9 +13,9 @@ from .asset_pool import AssetPool, calc_polarity_diff
 
 
 class PositionType(IntEnum):
-    SIDELINE = 0
-    BUY = 1
-    SELL = 2
+    BUY = 0
+    SELL = 1
+    SIDELINE = 2
 
 
 class Position:
@@ -164,7 +164,8 @@ class TradingPlatform(gym.Env):
         self._max_positions_num = max_positions_num
         self._max_steps_num = max_steps_num
         # Environment
-        self.action_space = gym.spaces.Discrete(len(PositionType))
+        # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
+        self.action_space = gym.spaces.Discrete(len(PositionType) - 1)
         # NOTE: Theoretically, we only need the historical price when deciding the position order (buy/sell or hold).
         # However, with DQN (or perhaps many other RL algorithms),
         # to inform the agent about how long the episode has elapsed and how long it takes to finish the episode,
@@ -174,6 +175,8 @@ class TradingPlatform(gym.Env):
             # Suppose that delta values (ratios) are greater than -1 and less than 1,
             # meaning prices and other indicators never drop to 0 and never double from previous day.
             "historical_ema_diffs": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            # Position types have the same values as action space.
+            "position_type": gym.spaces.Discrete(len(PositionType)),
         })
         # Refresh platform-level state components
         self.refresh()
@@ -365,6 +368,7 @@ class TradingPlatform(gym.Env):
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_ema_diffs": np.array(self._minmax_scale([p.ema_diff for p in self._prices])),
+            "position_type": np.array([self._positions[-1].position_type], dtype=int),
         }
 
     @staticmethod
