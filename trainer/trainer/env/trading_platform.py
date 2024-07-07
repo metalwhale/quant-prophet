@@ -342,12 +342,12 @@ class TradingPlatform(gym.Env):
 
     @property
     def _position_amount(self) -> float:
+        # Unit price is mainly used for training, whereas using actual price as a position amount often implies evaluation
         return self._POSITION_AMOUNT_UNIT if self.is_training else self._prices[-1].actual_price
 
     @property
     def _initial_balance(self) -> float:
-        # NOTE: A zero initial balance may seem illogical, but in evaluation, only earnings matter, not the initial balance.
-        # The balance is mainly used for training, while using price as a position amount often implies evaluation.
+        # A zero initial balance may seem illogical, but in evaluation, only earnings matter, not the initial balance
         return self._INITIAL_BALANCE_UNIT if self.is_training else 0
 
     @property
@@ -417,6 +417,6 @@ def calc_earning(
         earning += (final_price.date - positions[-1].date).days * positions[-1].amount * -position_holding_daily_fee
         earning += positions[-1].amount * -position_opening_penalty
     logging.debug("%s %f %s", positions[-1].date, positions[-1].entry_price, positions[-1].position_type)
-    # Actual price change equals a BUY position, hence `1` instead of `-1`
-    actual_price_change = (final_price.actual_price / positions[0].entry_price - 1) * 1 * positions[0].amount
-    return earning, actual_price_change
+    # Price change equals a BUY position, hence `1` instead of `-1`
+    price_change = positions[0].amount * 1 * (final_price.actual_price / positions[0].entry_price - 1)
+    return earning, price_change
