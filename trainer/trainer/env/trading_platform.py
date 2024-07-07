@@ -114,9 +114,9 @@ class TradingPlatform(gym.Env):
 
     # Hyperparameters for termination and truncation
     _max_balance_loss: float  # Positive ratio
-    _max_balance_gain: float  # Positive ratio
-    _max_positions_num: int  # Maximum number of positions (greater than 1) allowed in one episode
-    _max_steps_num: int  # Maximum number of steps allowed in one episode
+    _max_balance_gain: Optional[float]  # Positive ratio
+    _max_positions_num: Optional[int]  # Maximum number of positions (greater than 1) allowed in one episode
+    _max_steps_num: Optional[int]  # Maximum number of steps allowed in one episode
 
     # State components
     # Platform-level, only changed if we refresh
@@ -146,9 +146,9 @@ class TradingPlatform(gym.Env):
         position_holding_daily_fee: float = 0.0,
         position_opening_penalty: float = 0.0,
         max_balance_loss: float = 0.0,
-        max_balance_gain: float = 0.0,
-        max_positions_num: int = 0,
-        max_steps_num: int = 0,
+        max_balance_gain: Optional[float] = None,
+        max_positions_num: Optional[int] = None,
+        max_steps_num: Optional[int] = None,
     ) -> None:
         super().__init__()
         self.is_training = True
@@ -254,10 +254,13 @@ class TradingPlatform(gym.Env):
             # Reaching the end of training date
             is_end_of_date
             # Realizing profits
-            or self._balance >= self._initial_balance * (1 + self._max_balance_gain)
+            or (
+                self._max_balance_gain is not None
+                and self._balance >= self._initial_balance * (1 + self._max_balance_gain)
+            )
             # Other conditions
-            or len(self._positions) >= self._max_positions_num
-            or self._date_index >= self._max_steps_num
+            or (self._max_positions_num is not None and len(self._positions) >= self._max_positions_num)
+            or (self._max_steps_num is not None and self._date_index >= self._max_steps_num)
         )
         # Observation and additional info
         observation = self._obtain_observation()

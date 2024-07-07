@@ -38,12 +38,12 @@ def generate_envs(
     train_asset_pool = train_asset_pool_generator()
     train_asset_pool.apply_date_range(
         (None, LAST_TRAINING_DATE), HISTORICAL_DAYS_NUM,
-        ahead_days_num=YEARLY_TRADABLE_DAYS_NUM,
+        ahead_days_num=YEARLY_TRADABLE_DAYS_NUM,  # TODO: Choose the same value as `train_env._max_steps_num`
     )
     train_env = TradingPlatform(
         train_asset_pool, HISTORICAL_DAYS_NUM,
         position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
-        max_balance_loss=1.0, max_balance_gain=0.5, max_positions_num=50, max_steps_num=YEARLY_TRADABLE_DAYS_NUM,
+        max_balance_loss=1.0,
     )
     train_env.is_training = True
     rep_train_env = TradingPlatform(
@@ -92,7 +92,7 @@ def generate_zigzag_assets(assets_num: int) -> List[Zigzag]:
         Zigzag(
             datetime.datetime.now().strftime("%Y%m%d%H%M%S") + "_"
             + "".join(np.random.choice([*(string.ascii_letters + string.digits)], size=4)),
-            ZIGZAG_PUBLISHED_DATE, np.random.uniform(0, 100),
+            ZIGZAG_PUBLISHED_DATE, np.random.uniform(0, 10),
             (0.55, 0.45), (2, 6), (0.0025, 0.005), (-0.02, 0.02),
         )
         for _ in range(assets_num)
@@ -135,14 +135,15 @@ def train(env_type: str):
     model = DQN(
         "MultiInputPolicy", train_env,
         gamma=0.95, policy_kwargs={"net_arch": [64, 64, 64]},
+        exploration_fraction=0.02,
         verbose=1,
     )
     model.learn(
-        total_timesteps=2000000,
+        total_timesteps=20000000,
         callback=FullEvalCallback(
             Path(__file__).parent.parent / "data" / env_type / "output" / now,
             eval_envs, 100,
             showing_image=False,
         ),
-        log_interval=1000,
+        log_interval=100,
     )
