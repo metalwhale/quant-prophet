@@ -1,11 +1,12 @@
 import datetime
 import string
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 from stable_baselines3 import DQN
 
+from trainer.asset.base import DailyAsset
 from trainer.asset.stock import Stock
 from trainer.asset.zigzag import Zigzag
 from trainer.env.asset_pool import AssetPool
@@ -29,13 +30,15 @@ STOCK_SYMBOLS = ["AAPL"]
 ZIGZAG_PUBLISHED_DATE = datetime.datetime.strptime("2000-01-01", "%Y-%m-%d").date()
 
 
-def generate_envs(
-    train_asset_pool_generator: Callable[[], AssetPool],
-    val_asset_pool_generator: Callable[[], AssetPool],
-    test_asset_pool_generator: Callable[[], AssetPool],
-) -> Tuple[TradingPlatform, Dict[str, TradingPlatform]]:
+def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, TradingPlatform]]:
     # Training environment
-    train_asset_pool = train_asset_pool_generator()
+    train_asset_pool = AssetPool(
+        assets,
+        secondary_asset_generator=lambda: generate_zigzag_assets(1),
+        # NOTE: This param is nearly meaningless if `ahead_days_num` param of `apply_date_range` method below
+        # differs significantly from `train_env._max_steps_num`
+        polarity_temperature=5.0,
+    )
     train_asset_pool.apply_date_range(
         (None, LAST_TRAINING_DATE), HISTORICAL_DAYS_NUM,
         ahead_days_num=YEARLY_TRADABLE_DAYS_NUM,  # TODO: Choose the same value as `train_env._max_steps_num`
@@ -52,7 +55,7 @@ def generate_envs(
     )
     rep_train_env.is_training = False
     # Validation environment
-    val_asset_pool = val_asset_pool_generator()
+    val_asset_pool = AssetPool(assets)
     val_asset_pool.apply_date_range(
         (LAST_TRAINING_DATE, LAST_VALIDATION_DATE), HISTORICAL_DAYS_NUM,
         excluding_historical=False,
@@ -63,7 +66,7 @@ def generate_envs(
     )
     val_env.is_training = False
     # Test environment
-    test_asset_pool = test_asset_pool_generator()
+    test_asset_pool = AssetPool(assets)
     test_asset_pool.apply_date_range(
         (LAST_VALIDATION_DATE, None), HISTORICAL_DAYS_NUM,
         excluding_historical=False,
@@ -100,37 +103,13 @@ def generate_zigzag_assets(assets_num: int) -> List[Zigzag]:
     return assets
 
 
-def generate_stock_envs() -> Tuple[TradingPlatform, Dict[str, TradingPlatform]]:
-    return generate_envs(
-        lambda: AssetPool(
-            generate_stock_assets(STOCK_SYMBOLS),
-            secondary_asset_generator=lambda: generate_zigzag_assets(1),
-            polarity_temperature=5.0,
-        ),
-        lambda: AssetPool(generate_stock_assets(STOCK_SYMBOLS)),
-        lambda: AssetPool(generate_stock_assets(STOCK_SYMBOLS)),
-    )
-
-
-def generate_zigzag_envs() -> Tuple[TradingPlatform, Dict[str, TradingPlatform]]:
-    return generate_envs(
-        lambda: AssetPool(
-            generate_zigzag_assets(5),
-            secondary_asset_generator=lambda: generate_zigzag_assets(1),
-            polarity_temperature=5.0,
-        ),
-        lambda: AssetPool(generate_zigzag_assets(5)),
-        lambda: AssetPool(generate_zigzag_assets(5)),
-    )
-
-
 def train(env_type: str):
     train_env: TradingPlatform
     eval_envs: Dict[str, TradingPlatform]
     if env_type == "stock":
-        train_env, eval_envs = generate_stock_envs()
+        train_env, eval_envs = generate_envs(generate_stock_assets(STOCK_SYMBOLS))
     elif env_type == "zigzag":
-        train_env, eval_envs = generate_zigzag_envs()
+        train_env, eval_envs = generate_envs(generate_zigzag_assets(5))
     now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     model = DQN(
         "MultiInputPolicy", train_env,
