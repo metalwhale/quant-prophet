@@ -393,14 +393,19 @@ def calc_position_net_ratio(position: Position, actual_price: float) -> float:
 def calc_earning(
     positions: List[Position], final_price: DailyPrice,
     position_holding_daily_fee: float = 0.0, position_opening_penalty: float = 0.0, short_period_penalty: float = 0.0,
-) -> Tuple[float, float]:
+) -> Tuple[float, float, float]:
     if len(positions) < 1 or positions[-1].date > final_price.date:
-        return (0, 0)
+        return (0, 0, 0)
     earning = 0
+    position_net_ratios: List[float] = []
+    price_change_ratios: List[float] = []
     # Rewards (net, fee, penalty) of closed positions (excluding the last position, as it is probably not yet closed)
     for prev_position, cur_position in zip(positions[:-1], positions[1:]):
         # Position net
-        earning += prev_position.amount * calc_position_net_ratio(prev_position, cur_position.entry_price)
+        position_net_ratio = calc_position_net_ratio(prev_position, cur_position.entry_price)
+        position_net_ratios.append(position_net_ratio)
+        price_change_ratios.append(cur_position.entry_price / prev_position.entry_price - 1)
+        earning += prev_position.amount * position_net_ratio
         if prev_position.position_type != PositionType.SIDELINE:
             # Holding fee
             earning += (cur_position.date - prev_position.date).days \
@@ -412,11 +417,22 @@ def calc_earning(
             earning += prev_position.amount * -short_period_penalty / (cur_position.date - prev_position.date).days
         logging.debug("%s %f %s", prev_position.date, prev_position.entry_price, prev_position.position_type)
     # Reward of the last position
-    earning += positions[-1].amount * calc_position_net_ratio(positions[-1], final_price.actual_price)
+    last_position_net_ratio = calc_position_net_ratio(positions[-1], final_price.actual_price)
+    position_net_ratios.append(last_position_net_ratio)
+    price_change_ratios.append(final_price.actual_price / positions[-1].entry_price - 1)
+    earning += positions[-1].amount * last_position_net_ratio
     if positions[-1].position_type != PositionType.SIDELINE:
         earning += (final_price.date - positions[-1].date).days * positions[-1].amount * -position_holding_daily_fee
         earning += positions[-1].amount * -position_opening_penalty
     logging.debug("%s %f %s", positions[-1].date, positions[-1].entry_price, positions[-1].position_type)
     # Price change equals a BUY position, hence `1` instead of `-1`
     price_change = positions[0].amount * 1 * (final_price.actual_price / positions[0].entry_price - 1)
-    return earning, price_change
+    # Win-lose rate
+    wl_rate = sum([
+        # Position net ratios and price change ratios always have the same absolute value but differ in sign,
+        # depending on the position type and whether the price is going up or down.
+        1 if pnr > pcr else -1 if pnr < pcr else 0
+        # Use `pnr if pnr != pcr else 0` to calculate average net ratio
+        for pnr, pcr in zip(position_net_ratios, price_change_ratios)
+    ]) / len(position_net_ratios)
+    return earning, price_change, wl_rate
