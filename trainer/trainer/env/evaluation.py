@@ -69,7 +69,7 @@ class FullEvalCallback(BaseCallback):
             # TODO: Iterate through all assets
             (
                 rendered,
-                (_, earning, price_change),
+                (_, earning, price_change, wl_rate),
                 (positions, last_price),
             ) = trade(
                 env,
@@ -95,6 +95,7 @@ class FullEvalCallback(BaseCallback):
             draw.text((60, 60), f"Episode {self._ep_count}: " + ", ".join([
                 f"{env_name}_earning={earning:.2f}",
                 f"{env_name}_price_change={price_change:.2f}",
+                f"{env_name}_wl_rate={wl_rate:.2f}",
             ]), fill=(0, 0, 0), font_size=120)
             if self._showing_image:
                 plt.close("all")
@@ -104,11 +105,12 @@ class FullEvalCallback(BaseCallback):
                 f"{env_name}_earning": earning,
                 f"{env_name}_price_change": price_change,
                 f"{env_name}_earning_discrepancy": earning / price_change - 1,
+                f"{env_name}_wl_rate": wl_rate,
             }
         # Write overview log
         overview_log_field_names = [
             "ep_count",
-            *[f for n in self._envs.keys() for f in [f"{n}_earning", f"{n}_earning_discrepancy"]],
+            *[f for n in self._envs.keys() for f in [f"{n}_earning", f"{n}_earning_discrepancy", f"{n}_wl_rate"]],
         ]
         overview_log_file_path = self._output_path / self._OVERVIEW_LOG_FILE_NAME
         if not os.path.isfile(overview_log_file_path):
@@ -137,6 +139,11 @@ class FullEvalCallback(BaseCallback):
                 [r["ep_count"] for r in self._overview_records],
                 [r[f"{env_name}_earning_discrepancy"] for r in self._overview_records],
                 color="blue",
+            )
+            axes.plot(
+                [r["ep_count"] for r in self._overview_records],
+                [r[f"{env_name}_wl_rate"] for r in self._overview_records],
+                color="orange",
             )
         figure.canvas.draw()
         image = np.frombuffer(figure.canvas.tostring_rgb(), dtype=np.uint8) \
@@ -184,7 +191,7 @@ def trade(
     rendered = env.render() if rendering else None
     # Calculate the balance
     calculated_balance = env._initial_balance
-    earning, price_change = calc_earning(
+    earning, price_change, wl_rate = calc_earning(
         env._positions, env._prices[-1],
         # TODO: Include fees even if not in training mode
         position_holding_daily_fee=env._position_holding_daily_fee if env.is_training else 0,
@@ -197,7 +204,7 @@ def trade(
     # Platform balance and self-calculated balance should be equal
     return (
         rendered,
-        (platform_balance, calculated_balance, price_change),
+        (platform_balance, calculated_balance, price_change, wl_rate),
         (env._positions, env._prices[-1]),
     )
 
