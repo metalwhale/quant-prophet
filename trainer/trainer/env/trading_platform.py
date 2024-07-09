@@ -6,7 +6,9 @@ from typing import Any, Dict, List, Optional, SupportsFloat, Tuple
 
 import gymnasium as gym
 import numpy as np
+import torch
 from matplotlib import pyplot as plt
+from stable_baselines3.common.base_class import BaseAlgorithm
 
 from ..asset.base import DailyAsset, DailyPrice
 from .asset_pool import AssetPool, calc_polarity_diff
@@ -335,6 +337,60 @@ class TradingPlatform(gym.Env):
     def refresh(self):
         self._polarity_diff = 0
         self._date_chosen_counter = defaultdict(lambda: defaultdict(int))
+
+    def trade(
+        self,
+        model: Optional[BaseAlgorithm] = None,
+        action_diff_threshold: Optional[float] = None,
+        max_step: Optional[int] = None,
+        stopping_when_done: bool = True,
+        rendering: bool = True,
+    ) -> Tuple[Any, Tuple[float, ...], Tuple[List[Position], DailyPrice]]:
+        self.render_mode = "rgb_array"
+        obs, _ = self.reset()
+        # Run one episode
+        step = 0
+        action = None
+        while max_step is None or step < max_step:
+            if model is not None:
+                if action_diff_threshold is None:
+                    action, _ = model.predict(obs, deterministic=True)
+                else:
+                    model.policy.set_training_mode(False)
+                    obs_tensor, _ = model.policy.obs_to_tensor(obs)
+                    with torch.no_grad():
+                        q_values = model.policy.q_net(obs_tensor)
+                    # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
+                    v1, v2 = q_values.numpy()[0]
+                    if abs(v1 / v2 - 1) >= action_diff_threshold or action is None:
+                        action = 0 if v1 > v2 else 1
+            else:
+                action = int(np.random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL]))
+            obs, _, terminated, truncated, info = self.step(action)
+            is_end_of_date = info["is_end_of_date"]
+            logging.debug("%s %f %f", self._prices[-1].date, self._prices[-1].actual_price, self._balance)
+            if is_end_of_date or (stopping_when_done and (terminated or truncated)):
+                break
+            step += 1
+        rendered = self.render() if rendering else None
+        # Calculate the balance
+        calculated_balance = self._initial_balance
+        earning, price_change, wl_rate = calc_earning(
+            self._positions, self._prices[-1],
+            # TODO: Include fees even if not in training mode
+            position_holding_daily_fee=self._position_holding_daily_fee if self.is_training else 0,
+            position_opening_penalty=self._position_opening_penalty if self.is_training else 0,
+            short_period_penalty=self._short_period_penalty if self.is_training else 0,
+        )
+        calculated_balance += earning
+        logging.debug("%s %f", self._prices[-1].date, self._prices[-1].actual_price)
+        platform_balance = self._balance
+        # Platform balance and self-calculated balance should be equal
+        return (
+            rendered,
+            (platform_balance, calculated_balance, price_change, wl_rate),
+            (self._positions, self._prices[-1]),
+        )
 
     @property
     def _asset(self) -> DailyAsset:
