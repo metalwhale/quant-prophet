@@ -75,7 +75,7 @@ class FullEvalCallback(BaseCallback):
                     model=self.model,
                     action_diff_threshold=self._action_diff_threshold, stopping_when_done=False,
                 )
-                earning_discrepancy_sum += earning / price_change - 1
+                earning_discrepancy_sum += self.__calc_earning_discrepancy(price_change, earning)
                 wl_rate_sum += wl_rate
                 # Write trade positions
                 with open(self._output_path / symbol / f"trade_{env_name}_{self._ep_count}.csv", "w") as positions_file:
@@ -152,6 +152,15 @@ class FullEvalCallback(BaseCallback):
         if self._showing_image:
             plt.close("all")
         Image.fromarray(image).save(self._output_path / self._OVERVIEW_CHART_FILE_NAME)
+
+    @staticmethod
+    def __calc_earning_discrepancy(price_change: float, earning: float) -> float:
+        # Increase earning by the absolute value of it,
+        # plus double the absolute value of the price change if they have opposite signs.
+        magnitude = abs(earning) + (0 if earning * price_change >= 0 else 2 * abs(price_change))
+        magnitude_ratio = magnitude / abs(price_change) - 1
+        # Take into account the sign of the original earning value
+        return (1 if earning >= 0 else -1) * magnitude_ratio
 
 
 def show_image(image: Any):
