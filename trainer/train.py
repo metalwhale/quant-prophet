@@ -50,7 +50,7 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
     )
     rep_train_env.is_training = False
     # Evaluation environments
-    eval_envs: Dict[str, TradingPlatform] = {"train": rep_train_env}  # Use train env for evaluation as well
+    eval_envs: Dict[str, TradingPlatform] = {"0train": rep_train_env}  # Use train env for evaluation as well
     for i, last_eval_date in enumerate(EVAL_DATE_RANGES):
         eval_asset_pool = AssetPool(assets)
         eval_asset_pool.apply_date_range(
@@ -62,7 +62,7 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
             position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
         )
         eval_env.is_training = False
-        eval_envs[f"eval{i}"] = eval_env
+        eval_envs[f"{i + 1}eval"] = eval_env
     return train_env, eval_envs
 
 
@@ -83,12 +83,11 @@ def generate_zigzag_assets(assets_num: int) -> List[Zigzag]:
     PUBLISHED_DATE = datetime.datetime.strptime("1980-01-01", "%Y-%m-%d").date()  # Before `LAST_TRAINING_DATE`
     assets = [
         Zigzag(
-            datetime.datetime.now().strftime("%Y%m%d%H%M%S") + "_"
-            + "".join(np.random.choice([*(string.ascii_letters + string.digits)], size=4)),
+            f"zigzag_{i}" + "".join(np.random.choice([*(string.ascii_letters + string.digits)], size=4)),
             PUBLISHED_DATE, np.random.uniform(0, 10),
             (0.55, 0.45), (2, 6), (0.0025, 0.005), (-0.02, 0.02),
         )
-        for _ in range(assets_num)
+        for i in range(assets_num)
     ]
     return assets
 
@@ -97,7 +96,7 @@ def train(env_type: str):
     train_env: TradingPlatform
     eval_envs: Dict[str, TradingPlatform]
     if env_type == "stock":
-        train_env, eval_envs = generate_envs(generate_stock_assets())
+        train_env, eval_envs = generate_envs(generate_stock_assets() + generate_zigzag_assets(5))
     elif env_type == "zigzag":
         train_env, eval_envs = generate_envs(generate_zigzag_assets(5))
     now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

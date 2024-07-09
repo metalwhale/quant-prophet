@@ -60,6 +60,7 @@ class TradingPlatform(gym.Env):
 
     # Control flags
     is_training: bool
+    favorite_symbols: Optional[List[str]]
 
     # Terminology
     # "Episode" and "step":
@@ -153,7 +154,9 @@ class TradingPlatform(gym.Env):
         max_steps_num: Optional[int] = None,
     ) -> None:
         super().__init__()
+        # Control flags
         self.is_training = True
+        self.favorite_symbols = None
         # Hyperparameters
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
@@ -195,6 +198,7 @@ class TradingPlatform(gym.Env):
         if preferring_secondary:
             self._asset_pool.renew_secondary_assets()
         self._asset_symbol, self._date_range = self._asset_pool.choose_asset_date(
+            favorite_symbols=self.favorite_symbols,
             randomizing_start=self.is_training, target_polarity_diff=-self._polarity_diff,
             preferring_secondary=preferring_secondary,
         )
@@ -391,6 +395,10 @@ class TradingPlatform(gym.Env):
             (platform_balance, calculated_balance, price_change, wl_rate),
             (self._positions, self._prices[-1]),
         )
+
+    @property
+    def asset_pool(self) -> AssetPool:
+        return self._asset_pool
 
     @property
     def _asset(self) -> DailyAsset:
