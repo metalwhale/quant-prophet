@@ -117,17 +117,21 @@ class AssetPool:
 
     def choose_asset_date(
         self,
+        favorite_symbols: Optional[List[str]] = None,
         randomizing_start: bool = False,
         target_polarity_diff: Optional[int] = None,
         preferring_secondary: bool = False,
     ) -> Tuple[str, List[datetime.date]]:
-        symbol = np.random.choice([
+        candidate_symbols = [
             s for s in self._asset_date_ranges.keys()
             if (
                 (preferring_secondary and s not in self._primary_symbols)
                 or (not preferring_secondary and s in self._primary_symbols)
-            )
-        ])
+            ) and (favorite_symbols is None or s in favorite_symbols)
+        ]
+        if len(candidate_symbols) == 0:
+            raise ValueError
+        symbol = np.random.choice(candidate_symbols)
         # Get tradable date range
         date_polarities = self._asset_date_ranges[symbol].date_polarities
         date_range = [p.date for p in date_polarities]
@@ -155,6 +159,10 @@ class AssetPool:
 
     def get_asset(self, symbol: str) -> DailyAsset:
         return self._asset_date_ranges[symbol].asset
+
+    @property
+    def primary_symbols(self) -> List[str]:
+        return self._primary_symbols
 
     @property
     def is_secondary_generatable(self) -> bool:
