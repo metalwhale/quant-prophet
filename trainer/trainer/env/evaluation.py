@@ -1,18 +1,14 @@
 import csv
-import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 from PIL import Image, ImageDraw
-from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 
-from ..asset.base import DailyPrice
-from .trading_platform import Position, PositionType, TradingPlatform, calc_earning
+from .trading_platform import TradingPlatform
 
 
 class FullEvalCallback(BaseCallback):
@@ -71,11 +67,7 @@ class FullEvalCallback(BaseCallback):
                 rendered,
                 (_, earning, price_change, wl_rate),
                 (positions, last_price),
-            ) = trade(
-                env,
-                model=self.model,
-                action_diff_threshold=self._action_diff_threshold, stopping_when_done=False,
-            )
+            ) = env.trade(model=self.model, action_diff_threshold=self._action_diff_threshold, stopping_when_done=False)
             # Write trade positions
             with open(self._output_path / f"trade_{self._ep_count}_{env_name}.csv", "w") as positions_file:
                 positions_writer = csv.DictWriter(positions_file, ["date", "entry_price", "position_type"])
@@ -151,62 +143,6 @@ class FullEvalCallback(BaseCallback):
         if self._showing_image:
             plt.close("all")
         Image.fromarray(image).save(self._output_path / self._OVERVIEW_CHART_FILE_NAME)
-
-
-def trade(
-    env: TradingPlatform,
-    model: Optional[BaseAlgorithm] = None,
-    action_diff_threshold: Optional[float] = None,
-    max_step: Optional[int] = None,
-    stopping_when_done: bool = True,
-    rendering: bool = True,
-) -> Tuple[Any, Tuple[float, ...], Tuple[List[Position], DailyPrice]]:
-    env.render_mode = "rgb_array"
-    obs, _ = env.reset()
-    # TODO: Avoid using private attributes
-    # Run one episode
-    step = 0
-    action = None
-    while max_step is None or step < max_step:
-        if model is not None:
-            if action_diff_threshold is None:
-                action, _ = model.predict(obs, deterministic=True)
-            else:
-                model.policy.set_training_mode(False)
-                obs_tensor, _ = model.policy.obs_to_tensor(obs)
-                with torch.no_grad():
-                    q_values = model.policy.q_net(obs_tensor)
-                # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
-                v1, v2 = q_values.numpy()[0]
-                if abs(v1 / v2 - 1) >= action_diff_threshold or action is None:
-                    action = 0 if v1 > v2 else 1
-        else:
-            action = int(np.random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL]))
-        obs, _, terminated, truncated, info = env.step(action)
-        is_end_of_date = info["is_end_of_date"]
-        logging.debug("%s %f %f", env._prices[-1].date, env._prices[-1].actual_price, env._balance)
-        if is_end_of_date or (stopping_when_done and (terminated or truncated)):
-            break
-        step += 1
-    rendered = env.render() if rendering else None
-    # Calculate the balance
-    calculated_balance = env._initial_balance
-    earning, price_change, wl_rate = calc_earning(
-        env._positions, env._prices[-1],
-        # TODO: Include fees even if not in training mode
-        position_holding_daily_fee=env._position_holding_daily_fee if env.is_training else 0,
-        position_opening_penalty=env._position_opening_penalty if env.is_training else 0,
-        short_period_penalty=env._short_period_penalty if env.is_training else 0,
-    )
-    calculated_balance += earning
-    logging.debug("%s %f", env._prices[-1].date, env._prices[-1].actual_price)
-    platform_balance = env._balance
-    # Platform balance and self-calculated balance should be equal
-    return (
-        rendered,
-        (platform_balance, calculated_balance, price_change, wl_rate),
-        (env._positions, env._prices[-1]),
-    )
 
 
 def show_image(image: Any):
