@@ -28,3 +28,8 @@ Quantitative strategy using magic based on faith and luck
     ```bash
     docker compose exec trainer bash
     ```
+2. Run the command:
+    ```bash
+    cd trainer/
+    nohup python3 train.py &
+    ```
