@@ -30,9 +30,6 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
     train_asset_pool = AssetPool(
         assets,
         secondary_asset_generator=lambda: generate_zigzag_assets(1),
-        # NOTE: This param is nearly meaningless if `ahead_days_num` param of `apply_date_range` method below
-        # differs significantly from `train_env._max_steps_num`
-        polarity_temperature=5.0,
     )
     train_asset_pool.apply_date_range(
         (None, LAST_TRAINING_DATE), HISTORICAL_DAYS_NUM,
@@ -41,7 +38,6 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
     train_env = TradingPlatform(
         train_asset_pool, HISTORICAL_DAYS_NUM,
         position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
-        max_balance_loss=1.0,
     )
     train_env.is_training = True
     rep_train_env = TradingPlatform(
