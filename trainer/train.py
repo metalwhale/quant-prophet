@@ -111,3 +111,7 @@ def train(env_type: str):
         ),
         log_interval=100,
     )
+
+
+if __name__ == "__main__":
+    train("stock")
