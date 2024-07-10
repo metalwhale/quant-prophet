@@ -48,39 +48,21 @@ class Zigzag(DailyAsset):
         self._initialize()  # For fetching candles
 
     def _fetch_candles(self) -> List[DailyCandle]:
-        trend_start_date: datetime.date
-        trend_start_price: float
-        trend_end_date = self._published_date
-        trend_end_price = self._published_price
-        date = trend_end_date
-        last_date = datetime.datetime.now().date() + datetime.timedelta(days=-1)
         # Generate raw prices
+        trend_type: TrendType
+        trend_end_date = self._published_date
+        date = trend_end_date
+        price = self._published_price
         raw_prices: List[Tuple[datetime.date, float]] = []
-        while date <= last_date:
-            price = 0.0
-            if date == trend_end_date:
-                # Trend type for next trend
-                trend_type = np.random.choice([TrendType.UP, TrendType.DOWN], p=self._trend_type_weights)
-                # Number of days for next trend
-                trend_days = np.random.randint(*self._trend_period_range)
-                # Movement for next trend
-                movement_magnitude_ratio = trend_days * max(0, np.random.normal(*self._trend_movement_dist))
-                movement_ratio = 1.0 + (1 if trend_type == TrendType.UP else -1) * movement_magnitude_ratio
-                # Move to next trend
-                trend_start_date = trend_end_date
-                trend_start_price = trend_end_price
-                if (last_date - date).days < self._trend_period_range[1]:
-                    trend_end_date = last_date
-                else:
-                    trend_end_date += datetime.timedelta(days=trend_days)
-                trend_end_price *= movement_ratio
-                price = trend_start_price
-            else:
-                price = trend_start_price \
-                    + (date - trend_start_date).days / (trend_end_date - trend_start_date).days \
-                    * (trend_end_price - trend_start_price)
-            date += datetime.timedelta(days=1)
+        while date <= datetime.datetime.now().date() + datetime.timedelta(days=-1):
             raw_prices.append((date, price))
+            if date == trend_end_date:  # Next trend
+                trend_end_date += datetime.timedelta(days=np.random.randint(*self._trend_period_range))
+                trend_type = np.random.choice([TrendType.UP, TrendType.DOWN], p=self._trend_type_weights)
+            # Next date
+            date += datetime.timedelta(days=1)
+            price *= 1.0 + (1 if trend_type == TrendType.UP else -1) \
+                * max(0, np.random.normal(*self._trend_movement_dist))
         # Generate candles
         candles: List[DailyCandle] = []
         for date, price in zip(

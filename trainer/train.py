@@ -85,7 +85,7 @@ def generate_zigzag_assets(assets_num: int) -> List[Zigzag]:
         Zigzag(
             f"zigzag_{i}" + "".join(np.random.choice([*(string.ascii_letters + string.digits)], size=4)),
             PUBLISHED_DATE, np.random.uniform(0, 10),
-            (0.55, 0.45), (2, 6), (0.0025, 0.005), (-0.02, 0.02),
+            (0.55, 0.45), (2, 6), (0.005, 0.005), (-0.02, 0.02),
         )
         for i in range(assets_num)
     ]
