@@ -116,7 +116,7 @@ class TradingPlatform(gym.Env):
     _short_period_penalty: float = 0.0  # Penalty for holding positions for too short a period (UNUSED)
 
     # Hyperparameters for termination and truncation
-    _max_balance_loss: float  # Positive ratio
+    _max_balance_loss: Optional[float]  # Positive ratio
     _max_balance_gain: Optional[float]  # Positive ratio
     _max_positions_num: Optional[int]  # Maximum number of positions (greater than 1) allowed in one episode
     _max_steps_num: Optional[int]  # Maximum number of steps allowed in one episode
@@ -148,7 +148,7 @@ class TradingPlatform(gym.Env):
         historical_days_num: int,
         position_holding_daily_fee: float = 0.0,
         position_opening_penalty: float = 0.0,
-        max_balance_loss: float = 0.0,
+        max_balance_loss: Optional[float] = None,
         max_balance_gain: Optional[float] = None,
         max_positions_num: Optional[int] = None,
         max_steps_num: Optional[int] = None,
@@ -199,7 +199,7 @@ class TradingPlatform(gym.Env):
             self._asset_pool.renew_secondary_assets()
         self._asset_symbol, self._date_range = self._asset_pool.choose_asset_date(
             favorite_symbols=self.favorite_symbols,
-            randomizing_start=self.is_training, target_polarity_diff=-self._polarity_diff,
+            randomizing_start=self.is_training,
             preferring_secondary=preferring_secondary,
         )
         self._asset.prepare_indicators(close_random_radius=self._CLOSE_RANDOM_RADIUS if self.is_training else None)
@@ -250,15 +250,17 @@ class TradingPlatform(gym.Env):
         # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/handling_time_limits/
         # - https://farama.org/Gymnasium-Terminated-Truncated-Step-API
         # Termination conditions
-        terminated = (
-            # Liquidated
-            self._balance < self._initial_balance * (1 - self._max_balance_loss)
-        )
+        terminated = False
         # Truncation conditions
         is_end_of_date = self._date_index >= len(self._date_range) - 1
         truncated = (
             # Reaching the end of training date
             is_end_of_date
+            # Liquidated
+            or (
+                self._max_balance_loss is not None
+                and self._balance < self._initial_balance * (1 - self._max_balance_loss)
+            )
             # Realizing profits
             or (
                 self._max_balance_gain is not None
