@@ -57,6 +57,12 @@ class Position:
 # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/environment_creation/
 # - https://stable-baselines3.readthedocs.io/en/v2.3.2/guide/custom_env.html
 class TradingPlatform(gym.Env):
+    class ExtraInfo:
+        action_values: Dict[datetime.date, Tuple[float, float, float]]
+
+        def __init__(self) -> None:
+            self.action_values = {}
+
     metadata = {"render_modes": ["rgb_array"]}
 
     # Control flags
@@ -133,6 +139,9 @@ class TradingPlatform(gym.Env):
     _prices: List[DailyPrice]  # Updated whenever the date changes
     _positions: List[Position]  # Keeps adding positions in the same episode, clears them all for a new episode
     _balance: float  # Resets to initial balance after each episode
+
+    # Extra information
+    _extra_info: ExtraInfo
 
     # Constants, mainly used only for training
     # NOTE: In reality, initial balance should be higher than position amount to cover opening penalty.
@@ -218,6 +227,7 @@ class TradingPlatform(gym.Env):
         if self.is_training:
             self._date_chosen_counter[self._date_range[self._date_index]][self._asset_symbol] += 1
             self._polarity_diff += calc_polarity_diff(self._prices[-1].price_delta)
+        self._extra_info = self.ExtraInfo()
         return observation, info
 
     def step(self, action: np.int64) -> tuple[Dict[str, Any], SupportsFloat, bool, bool, dict[str, Any]]:
@@ -281,10 +291,10 @@ class TradingPlatform(gym.Env):
         # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
         # `num=1` is reserved for trading chart
         plt.rcParams.update({"font.size": 8})
-        figure = plt.figure(figsize=(10, 6 if self.is_training else 3), dpi=800, num=1, clear=True)
-        figure.subplots_adjust(left=0.05, bottom=0.1, right=0.95, top=0.9)
+        figure = plt.figure(figsize=(50, 3 if self.is_training else 6), dpi=400, num=1, clear=True)
+        figure.subplots_adjust(left=0.01, bottom=0.1, right=0.99, top=0.9)
         # Plot prices and positions
-        axes = figure.add_subplot(211 if self.is_training else 111)
+        axes = figure.add_subplot(111 if self.is_training else 211)
         prices = self._asset.retrieve_historical_prices(
             self._date_range[self._date_index],
             # Retrieve all the days before the current date in the date range
@@ -321,15 +331,27 @@ class TradingPlatform(gym.Env):
                     else:
                         color = "black"  # Placeholder
                     axes.plot([d for d, _ in date_prices], [p for _, p in date_prices], color=color, linewidth=0.5)
-                    axes.plot(*date_prices[0], color=color, marker="o", markersize=0.5)
+                    axes.plot(*date_prices[0], color=color, marker="o", markersize=0.25)
                 # Move to next position
                 position_index = next_position_index
                 date_prices = [date_price]
-        # Plot date counter
         dates = [p.date for p in prices]
-        if self.is_training:
+        # Plot action values
+        if not self.is_training:
+            action_values = self._extra_info.action_values
             axes = figure.add_subplot(212)
-            axes.bar(dates, [sum(self._date_chosen_counter[d].values()) for d in dates])
+            axes.plot(dates, [0 for _ in dates], color="gray")
+            axes.plot(dates, [action_values[d][0] if d in action_values else None for d in dates], color="green")
+            axes.plot(dates, [action_values[d][1] if d in action_values else None for d in dates], color="red")
+            axes.plot(dates, [action_values[d][2] if d in action_values else None for d in dates], color="orange")
+            for position in self._positions:
+                is_buy = position.position_type == PositionType.BUY
+                axes.plot(
+                    position.date, action_values[position.date][2],
+                    color="green" if is_buy else "red", marker="o", markersize=0.5,
+                )
+            for line in axes.lines:
+                line.set_linewidth(0.5)
         # Draw figure
         figure.canvas.draw()
         image = np.frombuffer(figure.canvas.tostring_rgb(), dtype=np.uint8) \
@@ -375,8 +397,10 @@ class TradingPlatform(gym.Env):
                             raise NotImplementedError
                     # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
                     v1, v2 = q_values.cpu().numpy().squeeze()
-                    if abs(v1 / v2 - 1) >= action_diff_threshold or action is None:
-                        action = 0 if v1 > v2 else 1
+                    action_diff = v1 - v2
+                    self._extra_info.action_values[self._prices[-1].date] = (v1, v2, action_diff)
+                    if abs(action_diff) >= action_diff_threshold or action is None:
+                        action = PositionType.BUY if action_diff >= 0 else PositionType.SELL
             else:
                 action = int(np.random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL]))
             obs, _, terminated, truncated, info = self.step(action)

@@ -154,7 +154,7 @@ class FullEvalCallback(BaseCallback):
         overview_results.append(result)
         # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
         # `num=2` is reserved for overview chart
-        figure = plt.figure(figsize=(10, 3 * len(self._envs)), dpi=800, num=2, clear=True)
+        figure = plt.figure(figsize=(10, 3 * len(self._envs)), dpi=400, num=2, clear=True)
         figure.subplots_adjust(left=0.05, bottom=0.05, right=0.95, top=0.95)
         for i, env_name in enumerate(self._envs.keys()):
             axes = figure.add_subplot(len(self._envs), 1, i + 1)
@@ -181,7 +181,7 @@ class FullEvalCallback(BaseCallback):
 
 
 def show_image(image: Any):
-    figure = plt.figure(figsize=(10, 6), dpi=800)
+    figure = plt.figure(figsize=(10, 6), dpi=400)
     axes = figure.add_subplot(111)
     axes.imshow(image)
     plt.axis("off")
