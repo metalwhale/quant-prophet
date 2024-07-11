@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from matplotlib import pyplot as plt
 from stable_baselines3.common.base_class import BaseAlgorithm
+from stable_baselines3 import DQN
 
 from ..asset.base import DailyAsset, DailyPrice
 from .asset_pool import AssetPool, calc_polarity_diff
@@ -362,12 +363,23 @@ class TradingPlatform(gym.Env):
                 if action_diff_threshold is None:
                     action, _ = model.predict(obs, deterministic=True)
                 else:
+                    # See:
+                    # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/common/base_class.py#L536
+                    # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/common/policies.py#L331
                     model.policy.set_training_mode(False)
                     obs_tensor, _ = model.policy.obs_to_tensor(obs)
+                    q_values: torch.Tensor
                     with torch.no_grad():
-                        q_values = model.policy.q_net(obs_tensor)
+                        # See:
+                        # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/dqn/policies.py#L183
+                        # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/dqn/policies.py#L68
+                        if isinstance(model, DQN):
+                            q_values = model.policy.q_net(obs_tensor)
+                        else:
+                            # TODO: Handle other algorithms
+                            raise NotImplementedError
                     # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
-                    v1, v2 = q_values.numpy()[0]
+                    v1, v2 = q_values.cpu().numpy().squeeze()
                     if abs(v1 / v2 - 1) >= action_diff_threshold or action is None:
                         action = 0 if v1 > v2 else 1
             else:
