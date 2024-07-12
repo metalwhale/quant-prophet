@@ -214,14 +214,8 @@ class TradingPlatform(gym.Env):
         self._asset.prepare_indicators(close_random_radius=self._CLOSE_RANDOM_RADIUS if self.is_training else None)
         self._date_index = 0
         self._retrieve_prices()
-        self._positions = [Position(
-            self._prices[-1].date,
-            PositionType(self.np_random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL])),
-            self._prices[-1].actual_price, self._position_amount,
-        )]  # First position
+        self._positions = []
         self._balance = self._initial_balance
-        if self._positions[-1].position_type != PositionType.SIDELINE:
-            self._balance += self._positions[-1].amount * -self._position_opening_penalty  # Opening penalty
         observation = self._obtain_observation()
         info = {}
         if self.is_training:
@@ -232,17 +226,8 @@ class TradingPlatform(gym.Env):
 
     def step(self, action: np.int64) -> tuple[Dict[str, Any], SupportsFloat, bool, bool, dict[str, Any]]:
         reward = 0
-        # Recalculate position's net by first reverting net of the previous date.
-        # The net of the current date will be calculated later.
-        reward -= self._positions[-1].amount * self._last_position_net_ratio
-        # Move to a new date (the current date)
-        self._date_index += 1
-        self._retrieve_prices()
-        reward += self._positions[-1].amount * self._last_position_net_ratio  # Position's net of the current date
-        if self._positions[-1].position_type != PositionType.SIDELINE:
-            reward += self._positions[-1].amount * -self._position_holding_daily_fee  # Holding fee
         # If the position type changes, close the current position and open a new one
-        if action != int(self._positions[-1].position_type):
+        if len(self._positions) == 0 or action != int(self._positions[-1].position_type):
             self._positions.append(Position(
                 self._prices[-1].date,
                 PositionType(action),
@@ -250,6 +235,16 @@ class TradingPlatform(gym.Env):
             ))
             if action != int(PositionType.SIDELINE):
                 reward += self._positions[-1].amount * -self._position_opening_penalty  # Opening penalty
+        # Recalculate position's net by first reverting net of the current date.
+        # The net of the next date will be calculated later.
+        reward -= self._positions[-1].amount * self._last_position_net_ratio
+        # Move to the next date
+        self._date_index += 1
+        self._retrieve_prices()
+        # TODO: Consider if it is okay to include net of the next date in the reward
+        reward += self._positions[-1].amount * self._last_position_net_ratio  # Net of the next date
+        if self._positions[-1].position_type != PositionType.SIDELINE:
+            reward += self._positions[-1].amount * -self._position_holding_daily_fee  # Holding fee
         # Treat the balance as a cumulative reward in each episode
         self._balance += reward
         # Read more about termination and truncation at:
@@ -365,7 +360,7 @@ class TradingPlatform(gym.Env):
     def trade(
         self,
         model: Optional[BaseAlgorithm] = None,
-        action_diff_threshold: Optional[float] = None,
+        action_diff_threshold: float = 0.0,
         max_step: Optional[int] = None,
         stopping_when_done: bool = True,
         rendering: bool = True,
@@ -377,30 +372,27 @@ class TradingPlatform(gym.Env):
         action = None
         while max_step is None or step < max_step:
             if model is not None:
-                if action_diff_threshold is None:
-                    action, _ = model.predict(obs, deterministic=True)
-                else:
-                    # See:
-                    # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/common/base_class.py#L536
-                    # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/common/policies.py#L331
-                    model.policy.set_training_mode(False)
-                    obs_tensor, _ = model.policy.obs_to_tensor(obs)
-                    q_values: torch.Tensor
-                    with torch.no_grad():
+                # See:
+                # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/common/base_class.py#L536
+                # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/common/policies.py#L331
+                model.policy.set_training_mode(False)
+                obs_tensor, _ = model.policy.obs_to_tensor(obs)
+                action_values: torch.Tensor
+                with torch.no_grad():
+                    if isinstance(model, DQN):
                         # See:
                         # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/dqn/policies.py#L183
                         # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/dqn/policies.py#L68
-                        if isinstance(model, DQN):
-                            q_values = model.policy.q_net(obs_tensor)
-                        else:
-                            # TODO: Handle other algorithms
-                            raise NotImplementedError
-                    # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
-                    v1, v2 = q_values.cpu().numpy().squeeze()
-                    action_diff = v1 - v2
-                    self._extra_info.action_values[self._prices[-1].date] = (v1, v2, action_diff)
-                    if abs(action_diff) >= action_diff_threshold or action is None:
-                        action = PositionType.BUY if action_diff >= 0 else PositionType.SELL
+                        action_values = model.policy.q_net(obs_tensor)
+                    else:
+                        # TODO: Handle other algorithms
+                        raise NotImplementedError
+                # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
+                buy_value, sell_value = action_values.cpu().numpy().squeeze()
+                action_diff = buy_value - sell_value
+                self._extra_info.action_values[self._prices[-1].date] = (buy_value, sell_value, action_diff)
+                if abs(action_diff) >= action_diff_threshold or action is None:
+                    action = PositionType.BUY if action_diff >= 0 else PositionType.SELL
             else:
                 action = int(np.random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL]))
             obs, _, terminated, truncated, info = self.step(action)
@@ -467,7 +459,12 @@ class TradingPlatform(gym.Env):
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_ema_diffs": np.array(self._minmax_scale([p.ema_diff for p in self._prices])),
-            "position_type": np.array([self._positions[-1].position_type], dtype=int),
+            "position_type": np.array([
+                self._positions[-1].position_type if len(self._positions) > 0 else PositionType(
+                    # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
+                    self.np_random.choice([PositionType.BUY, PositionType.SELL])
+                ),
+            ], dtype=int),
         }
 
     @staticmethod
