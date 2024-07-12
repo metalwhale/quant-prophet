@@ -8,6 +8,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
+from matplotlib.axes import Axes
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3 import DQN
 
@@ -286,16 +287,18 @@ class TradingPlatform(gym.Env):
         # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
         # `num=1` is reserved for trading chart
         plt.rcParams.update({"font.size": 8})
-        figure = plt.figure(figsize=(50, 3 if self.is_training else 6), dpi=400, num=1, clear=True)
+        figure = plt.figure(figsize=(50, 6 if self.is_training else 9), dpi=400, num=1, clear=True)
         figure.subplots_adjust(left=0.01, bottom=0.1, right=0.99, top=0.9)
-        # Plot prices and positions
-        axes = figure.add_subplot(111 if self.is_training else 211)
+        all_axes: List[Tuple[Axes, Dict[datetime.date, float]]] = []
+        # Plot prices
+        axes = figure.add_subplot(311)
         prices = self._asset.retrieve_historical_prices(
             self._date_range[self._date_index],
             # Retrieve all the days before the current date in the date range
             self._date_index + self._historical_days_num,
             randomizing_end=self.is_training,
         )
+        all_axes.append((axes, {p.date: p.actual_price for p in prices}))
         position_index: Optional[int] = None
         date_prices: List[Tuple[datetime.date, float]] = []
         for i, price in enumerate(prices):
@@ -325,26 +328,34 @@ class TradingPlatform(gym.Env):
                         color = "red"
                     else:
                         color = "black"  # Placeholder
-                    axes.plot([d for d, _ in date_prices], [p for _, p in date_prices], color=color, linewidth=0.5)
-                    axes.plot(*date_prices[0], color=color, marker="o", markersize=0.25)
+                    axes.plot([d for d, _ in date_prices], [p for _, p in date_prices], color=color)
                 # Move to next position
                 position_index = next_position_index
                 date_prices = [date_price]
         dates = [p.date for p in prices]
+        # Plot EMA diffs
+        axes = figure.add_subplot(312)
+        all_axes.append((axes, {p.date: p.ema_diff for p in prices}))
+        axes.plot(dates, [0 for _ in dates], color="gray")
+        axes.plot(dates, [p.ema_diff if p.date in dates else None for p in prices], color="orange")
         # Plot action values
-        if not self.is_training:
-            action_values = self._extra_info.action_values
-            axes = figure.add_subplot(212)
-            axes.plot(dates, [0 for _ in dates], color="gray")
-            axes.plot(dates, [action_values[d][0] if d in action_values else None for d in dates], color="green")
-            axes.plot(dates, [action_values[d][1] if d in action_values else None for d in dates], color="red")
-            axes.plot(dates, [action_values[d][2] if d in action_values else None for d in dates], color="orange")
+        action_values = self._extra_info.action_values
+        axes = figure.add_subplot(313)
+        all_axes.append((axes, {d: v[2] for d, v in action_values.items()}))
+        axes.plot(dates, [0 for _ in dates], color="gray")
+        axes.plot(dates, [action_values[d][0] if d in action_values else None for d in dates], color="green", alpha=0.2)
+        axes.plot(dates, [action_values[d][1] if d in action_values else None for d in dates], color="red", alpha=0.2)
+        axes.plot(dates, [action_values[d][2] if d in action_values else None for d in dates], color="orange")
+        # Common plots for all axes
+        for axes, position_values in all_axes:
+            # Plot positions
             for position in self._positions:
                 is_buy = position.position_type == PositionType.BUY
                 axes.plot(
-                    position.date, action_values[position.date][2],
+                    position.date, position_values[position.date],
                     color="green" if is_buy else "red", marker="o", markersize=0.5,
                 )
+            # Adjust other properties
             for line in axes.lines:
                 line.set_linewidth(0.5)
         # Draw figure
