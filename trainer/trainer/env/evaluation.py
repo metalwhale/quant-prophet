@@ -16,7 +16,7 @@ class FullEvalCallback(BaseCallback):
     _output_path: Path
     _envs: Dict[str, TradingPlatform]
     _freq: int
-    _action_diff_threshold: Optional[float]
+    _action_diff_threshold: float
     _showing_image: bool
 
     _ep_count: int
@@ -29,7 +29,7 @@ class FullEvalCallback(BaseCallback):
     def __init__(
         self,
         output_path: Path, envs: Dict[str, TradingPlatform], freq: int,
-        action_diff_threshold: Optional[int] = None, showing_image: bool = True,
+        action_diff_threshold: float = 0.0, showing_image: bool = True,
         verbose: int = 0,
     ):
         super().__init__(verbose)
