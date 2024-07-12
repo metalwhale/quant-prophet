@@ -114,7 +114,6 @@ class TradingPlatform(gym.Env):
     # I believe that changing the opening penalty affects how often new positions are opened,
     # i.e., increasing the opening penalty means the model may learn to open fewer positions.
     _position_opening_penalty: float  # Positive ratio
-    _short_period_penalty: float = 0.0  # Penalty for holding positions for too short a period (UNUSED)
 
     # Hyperparameters for termination and truncation
     _max_balance_loss: Optional[float]  # Positive ratio
@@ -234,10 +233,6 @@ class TradingPlatform(gym.Env):
             reward += self._positions[-1].amount * -self._position_holding_daily_fee  # Holding fee
         # If the position type changes, close the current position and open a new one
         if action != int(self._positions[-1].position_type):
-            if self._positions[-1].position_type != PositionType.SIDELINE:
-                # Penalize if the previous position is held for too short a period
-                reward += self._positions[-1].amount \
-                    * -self._short_period_penalty / (self._prices[-1].date - self._positions[-1].date).days
             self._positions.append(Position(
                 self._prices[-1].date,
                 PositionType(action),
@@ -398,7 +393,6 @@ class TradingPlatform(gym.Env):
             # TODO: Include fees even if not in training mode
             position_holding_daily_fee=self._position_holding_daily_fee if self.is_training else 0,
             position_opening_penalty=self._position_opening_penalty if self.is_training else 0,
-            short_period_penalty=self._short_period_penalty if self.is_training else 0,
         )
         calculated_balance += earning
         logging.debug("%s %f", self._prices[-1].date, self._prices[-1].actual_price)
@@ -470,7 +464,7 @@ def calc_position_net_ratio(position: Position, actual_price: float) -> float:
 
 def calc_earning(
     positions: List[Position], final_price: DailyPrice,
-    position_holding_daily_fee: float = 0.0, position_opening_penalty: float = 0.0, short_period_penalty: float = 0.0,
+    position_holding_daily_fee: float = 0.0, position_opening_penalty: float = 0.0,
 ) -> Tuple[float, float, float]:
     if len(positions) < 1 or positions[-1].date > final_price.date:
         return (0, 0, 0)
@@ -491,8 +485,6 @@ def calc_earning(
             # TODO: Skip calculating penalties when evaluating
             # Opening penalty
             earning += prev_position.amount * -position_opening_penalty
-            # Short-period penalty
-            earning += prev_position.amount * -short_period_penalty / (cur_position.date - prev_position.date).days
         logging.debug("%s %f %s", prev_position.date, prev_position.entry_price, prev_position.position_type)
     # Reward of the last position
     last_position_net_ratio = calc_position_net_ratio(positions[-1], final_price.actual_price)
