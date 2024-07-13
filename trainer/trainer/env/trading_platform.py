@@ -153,8 +153,8 @@ class TradingPlatform(gym.Env):
     # Constants, mainly used only for training
     # NOTE: In reality, initial balance should be higher than position amount to cover opening penalty.
     # Here, all set to 1 for simplicity.
-    _POSITION_AMOUNT_UNIT: float = 1.0  # Equal to or less than the initial balance
-    _INITIAL_BALANCE_UNIT: float = 1.0
+    _POSITION_AMOUNT_UNIT: float = 100.0  # Equal to or less than the initial balance
+    _INITIAL_BALANCE_UNIT: float = 100.0
     _ASSET_TYPE_WEIGHTS: Tuple[float, float] = [0.0, 1.0]  # (primary, secondary)
     _CLOSE_RANDOM_RADIUS: Optional[int] = 0
 
@@ -494,7 +494,7 @@ class TradingPlatform(gym.Env):
     def _obtain_observation(self) -> Dict[str, Any]:
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
-            "historical_ema_diffs": np.array(self._magnitude_scale([p.ema_diff for p in self._prices], 1)),
+            "historical_ema_diffs": np.array([p.ema_diff for p in self._prices]),
             "position_type": np.array([
                 self._positions[-1].position_type if len(self._positions) > 0 else PositionType(
                     # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
@@ -502,10 +502,6 @@ class TradingPlatform(gym.Env):
                 ),
             ], dtype=int),
         }
-
-    @staticmethod
-    def _magnitude_scale(array: List[float], factor: float) -> List[float]:
-        return [v * factor for v in array]
 
 
 def calc_position_net_ratio(position: Position, price: float) -> float:
