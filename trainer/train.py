@@ -23,7 +23,7 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
     HISTORICAL_DAYS_NUM = MONTHLY_TRADABLE_DAYS_NUM * 6
     YEARLY_INTEREST_RATE = 0.0  # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
     POSITION_HOLDING_DAILY_FEE = YEARLY_INTEREST_RATE / YEARLY_TRADABLE_DAYS_NUM
-    POSITION_OPENING_PENALTY = 0.01
+    POSITION_OPENING_PENALTY = 0.0
     # Training environment
     train_asset_pool = AssetPool(
         assets,
@@ -102,8 +102,9 @@ def train(env_type: str):
     now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     model = DQN(
         "MultiInputPolicy", train_env,
-        gamma=0.95, policy_kwargs={"net_arch": [64, 64, 64]},
+        gamma=0.9,
         exploration_fraction=0.02,
+        policy_kwargs={"net_arch": [128, 128, 128]},
         verbose=1,
     )
     model.learn(
@@ -111,7 +112,7 @@ def train(env_type: str):
         callback=FullEvalCallback(
             Path(__file__).parent.parent / "data" / env_type / "output" / now,
             eval_envs, 100,
-            showing_image=False,
+            action_diff_threshold=1.0, showing_image=False,
         ),
         log_interval=100,
     )
