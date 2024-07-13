@@ -17,10 +17,8 @@ class Zigzag(DailyAsset):
     _published_price: float
     _trend_type_weights: Tuple[float, float]  # (UP, DOWN)
     _trend_period_range: Tuple[int, int]
-    _trend_movement_dist: Tuple[float, float]  # Positive mean and standard deviation
+    _trend_movement_dist: Tuple[float, float]  # Positive location and scale
     _fluctuation_range: Tuple[float, float]  # Ratio, exclusive end
-
-    _MA_LENGTH_RANGE: Tuple[int, int] = (5, 20)  # TODO: Choose a better length
 
     def __init__(
         self,
@@ -62,12 +60,12 @@ class Zigzag(DailyAsset):
             # Next date
             date += datetime.timedelta(days=1)
             price *= 1.0 + (1 if trend_type == TrendType.UP else -1) \
-                * max(0, np.random.normal(*self._trend_movement_dist))
+                * max(0, np.random.laplace(*self._trend_movement_dist))
         # Generate candles
         candles: List[DailyCandle] = []
         for date, price in zip(
             [d for d, _ in raw_prices],
-            smoothen([p for _, p in raw_prices], np.random.randint(*self._MA_LENGTH_RANGE)),
+            smoothen([p for _, p in raw_prices], 5),  # TODO: Choose a better length
         ):
             high = price * (1 + np.random.uniform(0, self._fluctuation_range[1]))
             low = price * (1 + np.random.uniform(self._fluctuation_range[0], 0))
