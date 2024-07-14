@@ -469,7 +469,7 @@ class TradingPlatform(gym.Env):
     def _obtain_observation(self) -> Dict[str, Any]:
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
-            "historical_ema_diffs": np.array(self._minmax_scale([p.ema_diff for p in self._prices])),
+            "historical_ema_diffs": np.array(self._magnitude_scale([p.ema_diff for p in self._prices], 1)),
             "position_type": np.array([
                 self._positions[-1].position_type if len(self._positions) > 0 else PositionType(
                     # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
@@ -479,11 +479,8 @@ class TradingPlatform(gym.Env):
         }
 
     @staticmethod
-    def _minmax_scale(deltas: List[float]) -> List[float]:
-        # TODO: Is it ok to use instance normalization?
-        max_delta = max([abs(d) for d in deltas])
-        deltas = [d / max_delta for d in deltas]
-        return deltas
+    def _magnitude_scale(array: List[float], factor: float) -> List[float]:
+        return [v * factor for v in array]
 
 
 def calc_position_net_ratio(position: Position, actual_price: float) -> float:
