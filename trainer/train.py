@@ -80,13 +80,12 @@ def generate_zigzag_assets(assets_num: int) -> List[Zigzag]:
     assets = []
     for i in range(assets_num):
         up_weight = np.random.uniform(0.51, 0.53)
-        trend_movement_location = np.random.uniform(0.004, 0.006)
         trend_movement_scale = np.random.uniform(0.018, 0.022)
         assets.append(Zigzag(
             f"zigzag_{i}" + "".join(np.random.choice([*(string.ascii_letters + string.digits)], size=4)),
             PUBLISHED_DATE, np.random.uniform(0, 1),
-            (up_weight, 1.0 - up_weight), (1, 2), (trend_movement_location, trend_movement_scale),
-            (-0.02, 0.02),
+            (up_weight, 1.0 - up_weight), (1, 2), (0, trend_movement_scale),
+            (-0.0001, 0.0001),  # Small values are fine
         ))
     return assets
 

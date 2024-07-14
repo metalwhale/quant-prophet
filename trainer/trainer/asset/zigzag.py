@@ -59,8 +59,12 @@ class Zigzag(DailyAsset):
                 trend_type = np.random.choice([TrendType.UP, TrendType.DOWN], p=self._trend_type_weights)
             # Next date
             date += datetime.timedelta(days=1)
-            price *= 1.0 + (1 if trend_type == TrendType.UP else -1) \
-                * max(0, np.random.laplace(*self._trend_movement_dist))
+            movement_magnitude: float
+            while True:
+                movement_magnitude = np.random.laplace(*self._trend_movement_dist)
+                if movement_magnitude >= 0:
+                    break
+            price *= 1.0 + (1 if trend_type == TrendType.UP else -1) * movement_magnitude
         # Generate candles
         candles: List[DailyCandle] = []
         for date, price in zip(
