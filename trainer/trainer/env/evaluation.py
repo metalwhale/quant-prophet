@@ -102,11 +102,11 @@ class FullEvalCallback(BaseCallback):
                 # Draw trade chart
                 image = Image.fromarray(rendered)
                 draw = ImageDraw.Draw(image)
-                draw.text((60, 60), f"Episode {self._ep_count}: " + ", ".join([
-                    f"{env_name}_earning={earning:.2f}",
-                    f"{env_name}_price_change={price_change:.2f}",
-                    f"{env_name}_wl_rate={wl_rate:.2f}",
-                ]), fill=(0, 0, 0), font_size=120)
+                draw.text((60, 60), f"env={env_name}, episode={self._ep_count}:\n" + ", ".join([
+                    f"earning={earning:.2f}",
+                    f"price_change={price_change:.2f}",
+                    f"wl_rate={wl_rate:.2f}",
+                ]), fill=(0, 0, 0), font_size=80)
                 if self._showing_image:
                     plt.close("all")
                     show_image(image)
@@ -153,8 +153,7 @@ class FullEvalCallback(BaseCallback):
         # Draw overview chart
         overview_results.append(result)
         # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
-        # `num=2` is reserved for overview chart
-        figure = plt.figure(figsize=(10, 3 * len(self._envs)), dpi=400, num=2, clear=True)
+        figure = plt.figure(num="evaluation", figsize=(10, 3 * len(self._envs)), dpi=400, clear=True)
         figure.subplots_adjust(left=0.05, bottom=0.05, right=0.95, top=0.95)
         for i, env_name in enumerate(self._envs.keys()):
             axes = figure.add_subplot(len(self._envs), 1, i + 1)

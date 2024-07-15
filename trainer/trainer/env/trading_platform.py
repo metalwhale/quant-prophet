@@ -16,6 +16,10 @@ from ..asset.base import DailyAsset, DailyPrice
 from .asset_pool import AssetPool, calc_polarity_diff
 
 
+MONTHLY_TRADABLE_DAYS_NUM = 20
+YEARLY_TRADABLE_DAYS_NUM = 250
+
+
 class PositionType(IntEnum):
     BUY = 0
     SELL = 1
@@ -69,6 +73,7 @@ class TradingPlatform(gym.Env):
     # Control flags
     is_training: bool
     favorite_symbols: Optional[List[str]]
+    figure_num: str
 
     # Terminology
     # "Episode" and "step":
@@ -167,6 +172,7 @@ class TradingPlatform(gym.Env):
         # Control flags
         self.is_training = True
         self.favorite_symbols = None
+        self.figure_num = ""
         # Hyperparameters
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
@@ -282,22 +288,31 @@ class TradingPlatform(gym.Env):
         return observation, reward, terminated, truncated, info
 
     def render(self) -> Any | List[Any] | None:
+        YEAR_WIDTH = 2
+        SUBPLOT_HEIGHT = 3
         if self.render_mode != "rgb_array":
             return
-        # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
-        # `num=1` is reserved for trading chart
-        plt.rcParams.update({"font.size": 8})
-        figure = plt.figure(figsize=(50, 6 if self.is_training else 9), dpi=400, num=1, clear=True)
-        figure.subplots_adjust(left=0.01, bottom=0.1, right=0.99, top=0.9)
-        all_axes: List[Tuple[Axes, Dict[datetime.date, float]]] = []
-        # Plot prices
-        axes = figure.add_subplot(311)
+        # Retrieve prices
         prices = self._asset.retrieve_historical_prices(
             self._date_range[self._date_index],
             # Retrieve all the days before the current date in the date range
             self._date_index + self._historical_days_num,
             randomizing_end=self.is_training,
         )
+        dates = [p.date for p in prices]
+        plt.rcParams.update({"font.size": 8})
+        figure = plt.figure(
+            # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
+            num=f"trading_platform.{self.figure_num}",
+            # NOTE: Remember to increase the height of `figsize` if you add more plots
+            figsize=(len(dates) / YEARLY_TRADABLE_DAYS_NUM * YEAR_WIDTH, 3 * SUBPLOT_HEIGHT),
+            dpi=400,
+            clear=True,
+        )
+        figure.subplots_adjust(left=100 / len(dates), bottom=0.1, right=0.99, top=0.9)
+        all_axes: List[Tuple[Axes, Dict[datetime.date, float]]] = []
+        # Plot prices
+        axes = figure.add_subplot(311)
         all_axes.append((axes, {p.date: p.actual_price for p in prices}))
         position_index: Optional[int] = None
         date_prices: List[Tuple[datetime.date, float]] = []
@@ -332,7 +347,6 @@ class TradingPlatform(gym.Env):
                 # Move to next position
                 position_index = next_position_index
                 date_prices = [date_price]
-        dates = [p.date for p in prices]
         # Plot EMA diffs
         axes = figure.add_subplot(312)
         all_axes.append((axes, {p.date: p.ema_diff for p in prices}))

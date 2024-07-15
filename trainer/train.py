@@ -10,13 +10,11 @@ from trainer.asset.base import DailyAsset
 from trainer.asset.stock import Stock
 from trainer.asset.zigzag import Zigzag
 from trainer.env.asset_pool import AssetPool
-from trainer.env.trading_platform import TradingPlatform
+from trainer.env.trading_platform import MONTHLY_TRADABLE_DAYS_NUM, YEARLY_TRADABLE_DAYS_NUM, TradingPlatform
 from trainer.env.evaluation import FullEvalCallback
 
 
 def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, TradingPlatform]]:
-    MONTHLY_TRADABLE_DAYS_NUM = 20
-    YEARLY_TRADABLE_DAYS_NUM = 250
     LAST_TRAINING_DATE = datetime.datetime.strptime("1999-12-31", "%Y-%m-%d").date()
     EVAL_DATE_RANGES = [
         datetime.datetime.strptime(d, "%Y-%m-%d").date() if d is not None else None
@@ -40,11 +38,13 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
         position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
     )
     train_env.is_training = True
+    train_env.figure_num = "train"
     rep_train_env = TradingPlatform(
         train_asset_pool, HISTORICAL_DAYS_NUM,
         position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
     )
     rep_train_env.is_training = False
+    rep_train_env.figure_num = "train"
     # Evaluation environments
     eval_envs: Dict[str, TradingPlatform] = {"0train": rep_train_env}  # Use train env for evaluation as well
     for i, last_eval_date in enumerate(EVAL_DATE_RANGES):
@@ -58,6 +58,7 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
             position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
         )
         eval_env.is_training = False
+        eval_env.figure_num = "eval"  # All eval envs have the same `figure_num` to avoid creating too many figures
         eval_envs[f"{i + 1}eval"] = eval_env
     return train_env, eval_envs
 
