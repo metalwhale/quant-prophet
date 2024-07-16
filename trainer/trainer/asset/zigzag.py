@@ -20,6 +20,8 @@ class Zigzag(DailyAsset):
     _trend_movement_dist: Tuple[float, float]  # Positive location and scale
     _fluctuation_range: Tuple[float, float]  # Ratio, exclusive end
 
+    _SMA_LENGTH: int = 5  # TODO: Choose a better length
+
     def __init__(
         self,
         symbol: str,
@@ -50,10 +52,16 @@ class Zigzag(DailyAsset):
         trend_type: TrendType
         trend_end_date = self._published_date
         date = trend_end_date
-        price = self._published_price
-        raw_prices: List[Tuple[datetime.date, float]] = []
+        raw_price = self._published_price
+        prices: List[Tuple[datetime.date, float]] = []
+        sma_window: List[float] = []
         while date <= datetime.datetime.now().date() + datetime.timedelta(days=-1):
-            raw_prices.append((date, price))
+            # Smooth using SMA
+            sma_window.append(raw_price)
+            if len(sma_window) > self._SMA_LENGTH:
+                sma_window = sma_window[len(sma_window) - self._SMA_LENGTH:]  # Remove oldest prices
+            price = sum(sma_window) / len(sma_window)
+            prices.append((date, price))
             if date == trend_end_date:  # Next trend
                 trend_end_date += datetime.timedelta(days=np.random.randint(*self._trend_period_range))
                 trend_type = np.random.choice([TrendType.UP, TrendType.DOWN], p=self._trend_type_weights)
@@ -64,22 +72,12 @@ class Zigzag(DailyAsset):
                 movement_magnitude = np.random.laplace(*self._trend_movement_dist)
                 if movement_magnitude >= 0:
                     break
-            price *= 1.0 + (1 if trend_type == TrendType.UP else -1) * movement_magnitude
+            raw_price *= 1.0 + (1 if trend_type == TrendType.UP else -1) * movement_magnitude
         # Generate candles
         candles: List[DailyCandle] = []
-        for date, price in zip(
-            [d for d, _ in raw_prices],
-            smoothen([p for _, p in raw_prices], 5),  # TODO: Choose a better length
-        ):
+        for date, price in prices:
             high = price * (1 + np.random.uniform(0, self._fluctuation_range[1]))
             low = price * (1 + np.random.uniform(self._fluctuation_range[0], 0))
             close = np.random.uniform(low, high)
             candles.append(DailyCandle(date, high, low, close))
         return candles
-
-
-def smoothen(array: List[float], ma_length: int) -> List[float]:
-    # See: https://stackoverflow.com/a/34387987
-    array = np.cumsum(np.insert(array, 0, 0))
-    smooth_array = (array[ma_length:] - array[:-ma_length]) / ma_length
-    return smooth_array
