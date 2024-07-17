@@ -72,6 +72,7 @@ class TradingPlatform(gym.Env):
 
     # Control flags
     is_training: bool
+    smoothing_position_net: bool
     favorite_symbols: Optional[List[str]]
     figure_num: str
 
@@ -171,6 +172,7 @@ class TradingPlatform(gym.Env):
         super().__init__()
         # Control flags
         self.is_training = True
+        self.smoothing_position_net = False
         self.favorite_symbols = None
         self.figure_num = ""
         # Hyperparameters
@@ -465,7 +467,10 @@ class TradingPlatform(gym.Env):
 
     @property
     def _last_position_net_ratio(self) -> float:
-        return calc_position_net_ratio(self._positions[-1], self._prices[-1].actual_price)
+        return calc_position_net_ratio(
+            self._positions[-1],
+            self._prices[-1].smoothed_price if self.smoothing_position_net else self._prices[-1].actual_price,
+        )
 
     # Should be called right after updating `self._date_index` to the newest date
     def _retrieve_prices(self):
@@ -497,12 +502,12 @@ class TradingPlatform(gym.Env):
         return [v * factor for v in array]
 
 
-def calc_position_net_ratio(position: Position, actual_price: float) -> float:
+def calc_position_net_ratio(position: Position, price: float) -> float:
     position_type = position.position_type
     if position_type == PositionType.SIDELINE:
         return 0
     else:
-        return (actual_price / position.entry_price - 1) * (1 if position_type == PositionType.BUY else -1)
+        return (price / position.entry_price - 1) * (1 if position_type == PositionType.BUY else -1)
 
 
 def calc_earning(

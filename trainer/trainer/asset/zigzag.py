@@ -20,7 +20,8 @@ class Zigzag(DailyAsset):
     _trend_movement_dist: Tuple[float, float]  # Positive location and scale
     _fluctuation_range: Tuple[float, float]  # Ratio, exclusive end
 
-    _SMA_LENGTH: int = 5  # TODO: Choose a better length
+    # NOTE: If prices are smoothed at `DailyAsset` we don't need to do it here, so setting SMA length to 1 is fine
+    _SMA_LENGTH: int = 1  # TODO: LINK: Choose a better length
 
     def __init__(
         self,
@@ -57,10 +58,14 @@ class Zigzag(DailyAsset):
         sma_window: List[float] = []
         while date <= datetime.datetime.now().date() + datetime.timedelta(days=-1):
             # Smooth using SMA
-            sma_window.append(raw_price)
-            if len(sma_window) > self._SMA_LENGTH:
-                sma_window = sma_window[len(sma_window) - self._SMA_LENGTH:]  # Remove oldest prices
-            price = sum(sma_window) / len(sma_window)
+            price: float
+            if self._SMA_LENGTH == 1:
+                price = raw_price
+            else:
+                sma_window.append(raw_price)
+                if len(sma_window) > self._SMA_LENGTH:
+                    sma_window = sma_window[len(sma_window) - self._SMA_LENGTH:]  # Remove oldest prices
+                price = sum(sma_window) / len(sma_window)
             prices.append((date, price))
             if date == trend_end_date:  # Next trend
                 trend_end_date += datetime.timedelta(days=np.random.randint(*self._trend_period_range))
