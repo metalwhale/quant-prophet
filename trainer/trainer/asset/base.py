@@ -215,16 +215,16 @@ class DailyAsset(ABC):
         self, end_date: datetime.date, days_num: int,
         randomizing_end: bool = True,
     ) -> List[DailyPrice]:
-        end_date_index = self.__get_date_index(end_date)
+        end_index = self.__get_date_index(end_date)
         # We need `days_num` days for historical data (including the end date),
         # plus a few buffer days to calculate price deltas and indicators for the start day.
-        if end_date_index is None or end_date_index < (days_num - 1) + self.calc_buffer_days_num():
+        if end_index is None or end_index < (days_num - 1) + self.calc_buffer_days_num():
             return []
-        end_indicator = self.__indicators[end_date_index]
+        end_indicator = self.__indicators[end_index]
         prices: List[DailyPrice] = []
         # Historical prices for the days before `end_date`
-        start_date_index = end_date_index - (days_num - 1)
-        for i in range(start_date_index, end_date_index):
+        start_date_index = end_index - (days_num - 1)
+        for i in range(start_date_index, end_index):
             prices.append(DailyPrice(
                 self.__indicators[i].date,
                 self.__indicators[i].price,
@@ -234,26 +234,26 @@ class DailyAsset(ABC):
                 self.__indicators[i].fast_ema / self.__indicators[i].slow_ema - 1,
             ))
         # Price for `end_date`
-        end_date_price = 0.0
+        end_price: float
         if randomizing_end:
-            end_date_price = np.random.uniform(*end_indicator.price_range)
+            end_price = np.random.uniform(*end_indicator.price_range)
         else:
-            end_date_price = end_indicator.price
-        end_date_fast_ema = calc_ema(
-            end_date_price, self.__indicators[end_date_index - 1].fast_ema,
+            end_price = end_indicator.price
+        end_fast_ema = calc_ema(
+            end_price, self.__indicators[end_index - 1].fast_ema,
             self.__FAST_EMA_LENGTH,
         )
-        end_date_slow_ema = calc_ema(
-            end_date_price, self.__indicators[end_date_index - 1].slow_ema,
+        end_slow_ema = calc_ema(
+            end_price, self.__indicators[end_index - 1].slow_ema,
             self.__SLOW_EMA_LENGTH,
         )
         prices.append(DailyPrice(
             end_indicator.date,
-            end_date_price,
-            end_date_price / self.__indicators[end_date_index - self.__DELTA_DISTANCE].price - 1,
-            end_date_slow_ema / self.__indicators[end_date_index - self.__DELTA_DISTANCE].slow_ema - 1,
-            end_date_price / end_date_slow_ema - 1,
-            end_date_fast_ema / end_date_slow_ema - 1,
+            end_price,
+            end_price / self.__indicators[end_index - self.__DELTA_DISTANCE].price - 1,
+            end_slow_ema / self.__indicators[end_index - self.__DELTA_DISTANCE].slow_ema - 1,
+            end_price / end_slow_ema - 1,
+            end_fast_ema / end_slow_ema - 1,
         ))
         return prices
 
