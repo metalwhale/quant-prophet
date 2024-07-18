@@ -42,20 +42,18 @@ class DailyIndicator:
     _date: datetime.date
     _price_range: Tuple[float, float]
     _actual_price: float   # Close price or a random value between low price and high price
-    _smoothed_price: float  # Price smoothed by SMA
     _fast_ema: float
     _slow_ema: float
 
     def __init__(
         self,
         date: datetime.date,
-        price_range: Tuple[float, float], actual_price: float, smoothed_price: float,
+        price_range: Tuple[float, float], actual_price: float,
         fast_ema: float, slow_ema: float,
     ) -> None:
         self._date = date
         self._price_range = price_range
         self._actual_price = actual_price
-        self._smoothed_price = smoothed_price
         self._fast_ema = fast_ema
         self._slow_ema = slow_ema
 
@@ -70,10 +68,6 @@ class DailyIndicator:
     @property
     def actual_price(self) -> float:
         return self._actual_price
-
-    @property
-    def smoothed_price(self) -> float:
-        return self._smoothed_price
 
     @property
     def fast_ema(self) -> float:
@@ -143,7 +137,6 @@ class DailyAsset(ABC):
     __date_indices: Dict[str, int]
 
     # NOTE: When adding a new parameter for calculating indicators, remember to modify `calc_buffer_days_num` method
-    __SMA_LENGTH: int = 3  # TODO: LINK: Choose a better length
     __FAST_EMA_LENGTH = 5  # TODO: Choose a better length
     __SLOW_EMA_LENGTH = 20  # TODO: Choose a better length (longer than fast-length)
     __DELTA_DISTANCE = 1
@@ -200,7 +193,6 @@ class DailyAsset(ABC):
         self.__indicators = []
         prev_fast_ema: Optional[float] = None
         prev_slow_ema: Optional[float] = None
-        sma_window: List[float] = []
         for i, candle in enumerate(self.__candles):
             low = candle.low
             high = candle.high
@@ -216,23 +208,10 @@ class DailyAsset(ABC):
                     low = min(low, self.__candles[j].low)
                     high = max(high, self.__candles[j].high)
                 actual_price = np.random.uniform(low, high)
-            # Smooth using SMA
-            smoothed_price: float
-            if self.__SMA_LENGTH == 1:
-                smoothed_price = actual_price
-            else:
-                sma_window.append(actual_price)
-                if len(sma_window) > self.__SMA_LENGTH:
-                    sma_window = sma_window[len(sma_window) - self.__SMA_LENGTH:]  # Remove oldest prices
-                smoothed_price = sum(sma_window) / len(sma_window)
             # See: https://en.wikipedia.org/wiki/Exponential_smoothing
             fast_ema = calc_ema(actual_price, prev_fast_ema, self.__FAST_EMA_LENGTH)
             slow_ema = calc_ema(actual_price, prev_slow_ema, self.__SLOW_EMA_LENGTH)
-            self.__indicators.append(DailyIndicator(
-                candle.date,
-                (low, high), actual_price, smoothed_price,
-                fast_ema, slow_ema,
-            ))
+            self.__indicators.append(DailyIndicator(candle.date, (low, high), actual_price, fast_ema, slow_ema))
             prev_fast_ema = fast_ema
             prev_slow_ema = slow_ema
 
@@ -256,7 +235,7 @@ class DailyAsset(ABC):
             prices.append(DailyPrice(
                 self.__indicators[i].date,
                 self.__indicators[i].actual_price,
-                self.__indicators[i].smoothed_price,
+                self.__indicators[i].fast_ema,
                 self.__indicators[i].actual_price / self.__indicators[i - self.__DELTA_DISTANCE].actual_price - 1,
                 self.__indicators[i].slow_ema / self.__indicators[i - self.__DELTA_DISTANCE].slow_ema - 1,
                 self.__indicators[i].actual_price / self.__indicators[i].slow_ema - 1,
@@ -264,16 +243,10 @@ class DailyAsset(ABC):
             ))
         # Price for `end_date`
         end_actual_price: float
-        end_smoothed_price: float
         if randomizing_end:
             end_actual_price = np.random.uniform(*end_indicator.price_range)
-            # HACK: Calculate smoothed price of end date using smoothed price of the previous date
-            end_smoothed_price = self.__indicators[end_index - 1].smoothed_price \
-                + (- self.__indicators[end_index - self.__SMA_LENGTH].actual_price + end_actual_price) \
-                / self.__SMA_LENGTH
         else:
             end_actual_price = end_indicator.actual_price
-            end_smoothed_price = end_indicator.smoothed_price
         end_fast_ema = calc_ema(
             end_actual_price, self.__indicators[end_index - 1].fast_ema,
             self.__FAST_EMA_LENGTH,
@@ -285,7 +258,7 @@ class DailyAsset(ABC):
         prices.append(DailyPrice(
             end_indicator.date,
             end_actual_price,
-            end_smoothed_price,
+            end_fast_ema,
             end_actual_price / self.__indicators[end_index - self.__DELTA_DISTANCE].actual_price - 1,
             end_slow_ema / self.__indicators[end_index - self.__DELTA_DISTANCE].slow_ema - 1,
             end_actual_price / end_slow_ema - 1,
@@ -298,7 +271,7 @@ class DailyAsset(ABC):
         # TODO: Add more buffer for MAs
         return (
             # For `DailyIndicator` MAs
-            cls.__SMA_LENGTH + max(cls.__FAST_EMA_LENGTH, cls.__SLOW_EMA_LENGTH)
+            max(cls.__FAST_EMA_LENGTH, cls.__SLOW_EMA_LENGTH)
             # For `DailyPrice` deltas
             + cls.__DELTA_DISTANCE
         )

@@ -20,8 +20,7 @@ class Zigzag(DailyAsset):
     _trend_movement_dist: Tuple[float, float]  # Positive location and scale
     _fluctuation_range: Tuple[float, float]  # Ratio, exclusive end
 
-    # NOTE: If prices are smoothed at `DailyAsset` we don't need to do it here, so setting SMA length to 1 is fine
-    _SMA_LENGTH: int = 1  # TODO: LINK: Choose a better length
+    _SMA_LENGTH: int = 1  # TODO: Choose a better length
 
     def __init__(
         self,

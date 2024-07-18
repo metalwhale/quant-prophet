@@ -307,14 +307,14 @@ class TradingPlatform(gym.Env):
             # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
             num=f"trading_platform.{self.figure_num}",
             # NOTE: Remember to increase the height of `figsize` if you add more plots
-            figsize=(len(dates) / YEARLY_TRADABLE_DAYS_NUM * YEAR_WIDTH, 3 * SUBPLOT_HEIGHT),
+            figsize=(len(dates) / YEARLY_TRADABLE_DAYS_NUM * YEAR_WIDTH, 4 * SUBPLOT_HEIGHT),
             dpi=400,
             clear=True,
         )
         figure.subplots_adjust(left=100 / len(dates), bottom=0.1, right=0.99, top=0.9)
         all_axes: List[Tuple[Axes, Dict[datetime.date, float]]] = []
         # Plot prices
-        axes = figure.add_subplot(311)
+        axes = figure.add_subplot(411)
         all_axes.append((axes, {p.date: p.actual_price for p in prices}))
         position_index: Optional[int] = None
         date_prices: List[Tuple[datetime.date, float]] = []
@@ -349,14 +349,18 @@ class TradingPlatform(gym.Env):
                 # Move to next position
                 position_index = next_position_index
                 date_prices = [date_price]
+        # Plot smoothed prices
+        axes = figure.add_subplot(412)
+        all_axes.append((axes, {p.date: p.smoothed_price for p in prices}))
+        axes.plot(dates, [p.smoothed_price if p.date in dates else None for p in prices])
         # Plot EMA diffs
-        axes = figure.add_subplot(312)
+        axes = figure.add_subplot(413)
         all_axes.append((axes, {p.date: p.ema_diff for p in prices}))
         axes.plot(dates, [0 for _ in dates], color="gray")
         axes.plot(dates, [p.ema_diff if p.date in dates else None for p in prices], color="orange")
         # Plot action values
         action_values = self._extra_info.action_values
-        axes = figure.add_subplot(313)
+        axes = figure.add_subplot(414)
         all_axes.append((axes, {d: v[2] for d, v in action_values.items()}))
         axes.plot(dates, [0 for _ in dates], color="gray")
         axes.plot(dates, [action_values[d][0] if d in action_values else None for d in dates], color="green", alpha=0.2)
