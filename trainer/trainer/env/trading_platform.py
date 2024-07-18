@@ -240,7 +240,8 @@ class TradingPlatform(gym.Env):
             self._positions.append(Position(
                 self._prices[-1].date,
                 PositionType(action),
-                self._prices[-1].actual_price, self._position_amount,
+                self._prices[-1].smoothed_price if self.smoothing_position_net else self._prices[-1].actual_price,
+                self._position_amount,
             ))
             if action != int(PositionType.SIDELINE):
                 reward += self._positions[-1].amount * -self._position_opening_penalty  # Opening penalty
@@ -440,6 +441,7 @@ class TradingPlatform(gym.Env):
             # TODO: Include fees even if not in training mode
             position_holding_daily_fee=self._position_holding_daily_fee if self.is_training else 0,
             position_opening_penalty=self._position_opening_penalty if self.is_training else 0,
+            smoothing_position_net=self.smoothing_position_net,
         )
         calculated_balance += earning
         logging.debug("%s %f", self._prices[-1].date, self._prices[-1].actual_price)
@@ -517,6 +519,7 @@ def calc_position_net_ratio(position: Position, price: float) -> float:
 def calc_earning(
     positions: List[Position], final_price: DailyPrice,
     position_holding_daily_fee: float = 0.0, position_opening_penalty: float = 0.0,
+    smoothing_position_net: bool = False,
 ) -> Tuple[float, float, float]:
     if len(positions) < 1 or positions[-1].date > final_price.date:
         return (0, 0, 0)
@@ -539,7 +542,10 @@ def calc_earning(
             earning += prev_position.amount * -position_opening_penalty
         logging.debug("%s %f %s", prev_position.date, prev_position.entry_price, prev_position.position_type)
     # Reward of the last position
-    last_position_net_ratio = calc_position_net_ratio(positions[-1], final_price.actual_price)
+    last_position_net_ratio = calc_position_net_ratio(
+        positions[-1],
+        final_price.smoothed_price if smoothing_position_net else final_price.actual_price,
+    )
     position_net_ratios.append(last_position_net_ratio)
     price_change_ratios.append(final_price.actual_price / positions[-1].entry_price - 1)
     earning += positions[-1].amount * last_position_net_ratio
