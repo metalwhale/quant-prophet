@@ -136,10 +136,15 @@ class DailyAsset(ABC):
     __indicators: List[DailyIndicator]
     __date_indices: Dict[str, int]
 
-    # NOTE: When adding a new parameter for calculating indicators, remember to modify `calc_buffer_days_num` method
+    # Historical hyperparameters
+    # NOTE: When adding a new hyperparameter, remember to modify `calc_buffer_days_num` method
     __FAST_EMA_LENGTH = 5  # TODO: Choose a better length
     __SLOW_EMA_LENGTH = 20  # TODO: Choose a better length (longer than fast-length)
     __DELTA_DISTANCE = 1
+
+    # Prospective hyperparameters
+    # NOTE: When adding a new hyperparameter, remember to modify `calc_buffer_days_num` method
+    __SMOOTHED_SHIFT = 1  # TODO: Choose a better number of shifted days for smoothed prices
 
     __DATE_FORMAT = "%Y-%m-%d"
 
@@ -157,16 +162,17 @@ class DailyAsset(ABC):
         min_date: Optional[datetime.date] = None, max_date: Optional[datetime.date] = None,
         excluding_historical: bool = True,
     ) -> List[datetime.date]:
+        historical_buffer_days_num, prospective_buffer_days_num = self.calc_buffer_days_num()
         if (
             (min_date is not None and max_date is not None and min_date > max_date)
-            or len(self.__candles) < historical_days_num + self.calc_buffer_days_num()
+            or len(self.__candles) < historical_days_num + historical_buffer_days_num + prospective_buffer_days_num
         ):
-            return []
+            raise ValueError
         date_range: List[datetime.date] = []
         # `extra` means that in order to calculate anything (other than the actual price),
         # which requires data from previous days, we also count the days even before the first historical days.
         extra_historical_days_count = 0
-        for candle in self.__candles:
+        for i, candle in enumerate(self.__candles):
             date = candle.date
             if min_date is not None and date < min_date:
                 continue
@@ -174,10 +180,12 @@ class DailyAsset(ABC):
             # Stop skipping when we reach the last day of historical days
             if (
                 excluding_historical
-                and extra_historical_days_count < historical_days_num + self.calc_buffer_days_num()
+                and extra_historical_days_count < historical_days_num + historical_buffer_days_num
             ):
                 continue
             if max_date is not None and date > max_date:
+                break
+            if i >= (len(self.__candles) - 1) - prospective_buffer_days_num:
                 break
             date_range.append(date)
         return date_range
@@ -222,11 +230,17 @@ class DailyAsset(ABC):
         self, end_date: datetime.date, days_num: int,
         randomizing_end: bool = True,
     ) -> List[DailyPrice]:
+        historical_buffer_days_num, prospective_buffer_days_num = self.calc_buffer_days_num()
         end_index = self.__get_date_index(end_date)
-        # We need `days_num` days for historical data (including the end date),
-        # plus a few buffer days to calculate price deltas and indicators for the start day.
-        if end_index is None or end_index < (days_num - 1) + self.calc_buffer_days_num():
-            return []
+        if (
+            end_index is None
+            # We need `days_num` days for historical data (including the end date),
+            # plus a few buffer days to calculate price deltas and indicators for the start day.
+            or end_index < (days_num - 1) + historical_buffer_days_num
+            # We need a few buffer days to shift smoothed prices
+            or end_index > (len(self.__indicators) - 1) - prospective_buffer_days_num
+        ):
+            raise ValueError
         end_indicator = self.__indicators[end_index]
         prices: List[DailyPrice] = []
         # Historical prices for the days before `end_date`
@@ -235,7 +249,7 @@ class DailyAsset(ABC):
             prices.append(DailyPrice(
                 self.__indicators[i].date,
                 self.__indicators[i].actual_price,
-                self.__indicators[i].fast_ema,
+                self.__indicators[i + self.__SMOOTHED_SHIFT].fast_ema,
                 self.__indicators[i].actual_price / self.__indicators[i - self.__DELTA_DISTANCE].actual_price - 1,
                 self.__indicators[i].slow_ema / self.__indicators[i - self.__DELTA_DISTANCE].slow_ema - 1,
                 self.__indicators[i].actual_price / self.__indicators[i].slow_ema - 1,
@@ -258,7 +272,10 @@ class DailyAsset(ABC):
         prices.append(DailyPrice(
             end_indicator.date,
             end_actual_price,
-            end_fast_ema,
+            # It's impossible to use a randomized end price to calculate the shifted smoothed price,
+            # so we simply use the value we calculated earlier when preparing the indicators.
+            self.__indicators[end_index + self.__SMOOTHED_SHIFT].fast_ema,
+            # Others
             end_actual_price / self.__indicators[end_index - self.__DELTA_DISTANCE].actual_price - 1,
             end_slow_ema / self.__indicators[end_index - self.__DELTA_DISTANCE].slow_ema - 1,
             end_actual_price / end_slow_ema - 1,
@@ -267,14 +284,16 @@ class DailyAsset(ABC):
         return prices
 
     @classmethod
-    def calc_buffer_days_num(cls) -> int:
+    def calc_buffer_days_num(cls) -> Tuple[int, int]:
         # TODO: Add more buffer for MAs
-        return (
+        historical_buffer_days_num = (
             # For `DailyIndicator` MAs
             max(cls.__FAST_EMA_LENGTH, cls.__SLOW_EMA_LENGTH)
             # For `DailyPrice` deltas
             + cls.__DELTA_DISTANCE
         )
+        prospective_buffer_days_num = cls.__SMOOTHED_SHIFT
+        return (historical_buffer_days_num, prospective_buffer_days_num)
 
     @property
     def symbol(self) -> str:
