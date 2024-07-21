@@ -136,15 +136,12 @@ class DailyAsset(ABC):
     __indicators: List[DailyIndicator]
     __date_indices: Dict[str, int]
 
-    # Historical hyperparameters
-    # NOTE: When adding a new hyperparameter, remember to modify `calc_buffer_days_num` method
+    # NOTE: When adding a new hyperparameter to calculate historical and prospective data,
+    # remember to modify `calc_buffer_days_num` method
     __FAST_EMA_LENGTH = 5  # TODO: Choose a better length
     __SLOW_EMA_LENGTH = 20  # TODO: Choose a better length (longer than fast-length)
+    __SMOOTHED_RADIUS = 2  # TODO: Choose a better number of radius for calculating smoothed prices
     __DELTA_DISTANCE = 1
-
-    # Prospective hyperparameters
-    # NOTE: When adding a new hyperparameter, remember to modify `calc_buffer_days_num` method
-    __SMOOTHED_SHIFT = 1  # TODO: Choose a better number of shifted days for smoothed prices
 
     __DATE_FORMAT = "%Y-%m-%d"
 
@@ -237,7 +234,7 @@ class DailyAsset(ABC):
             # We need `days_num` days for historical data (including the end date),
             # plus a few buffer days to calculate price deltas and indicators for the start day.
             or end_index < (days_num - 1) + historical_buffer_days_num
-            # We need a few buffer days to shift smoothed prices
+            # We need a few buffer days of prospective data to calculate smoothed prices
             or end_index > (len(self.__indicators) - 1) - prospective_buffer_days_num
         ):
             raise ValueError
@@ -249,7 +246,10 @@ class DailyAsset(ABC):
             prices.append(DailyPrice(
                 self.__indicators[i].date,
                 self.__indicators[i].actual_price,
-                self.__indicators[i + self.__SMOOTHED_SHIFT].fast_ema,
+                sum([
+                    ind.actual_price
+                    for ind in self.__indicators[i - self.__SMOOTHED_RADIUS:i + self.__SMOOTHED_RADIUS + 1]
+                ]) / (2 * self.__SMOOTHED_RADIUS + 1),
                 self.__indicators[i].actual_price / self.__indicators[i - self.__DELTA_DISTANCE].actual_price - 1,
                 self.__indicators[i].slow_ema / self.__indicators[i - self.__DELTA_DISTANCE].slow_ema - 1,
                 self.__indicators[i].actual_price / self.__indicators[i].slow_ema - 1,
@@ -272,9 +272,12 @@ class DailyAsset(ABC):
         prices.append(DailyPrice(
             end_indicator.date,
             end_actual_price,
-            # It's impossible to use a randomized end price to calculate the shifted smoothed price,
+            # It's impossible to use a randomized end price to calculate the smoothed price,
             # so we simply use the value we calculated earlier when preparing the indicators.
-            self.__indicators[end_index + self.__SMOOTHED_SHIFT].fast_ema,
+            sum([
+                ind.actual_price
+                for ind in self.__indicators[end_index - self.__SMOOTHED_RADIUS:end_index + self.__SMOOTHED_RADIUS + 1]
+            ]) / (2 * self.__SMOOTHED_RADIUS + 1),
             # Others
             end_actual_price / self.__indicators[end_index - self.__DELTA_DISTANCE].actual_price - 1,
             end_slow_ema / self.__indicators[end_index - self.__DELTA_DISTANCE].slow_ema - 1,
@@ -286,13 +289,13 @@ class DailyAsset(ABC):
     @classmethod
     def calc_buffer_days_num(cls) -> Tuple[int, int]:
         # TODO: Add more buffer for MAs
-        historical_buffer_days_num = (
-            # For `DailyIndicator` MAs
-            max(cls.__FAST_EMA_LENGTH, cls.__SLOW_EMA_LENGTH)
-            # For `DailyPrice` deltas
-            + cls.__DELTA_DISTANCE
+        historical_buffer_days_num = max(
+            # For `DailyIndicator` MAs and `DailyPrice` deltas
+            max(cls.__FAST_EMA_LENGTH, cls.__SLOW_EMA_LENGTH) + cls.__DELTA_DISTANCE,
+            # For `DailyPrice` smoothed prices
+            cls.__SMOOTHED_RADIUS,
         )
-        prospective_buffer_days_num = cls.__SMOOTHED_SHIFT
+        prospective_buffer_days_num = cls.__SMOOTHED_RADIUS
         return (historical_buffer_days_num, prospective_buffer_days_num)
 
     @property
