@@ -8,8 +8,23 @@ from .base import DailyAsset, DailyCandle
 
 
 class TrendType(Enum):
-    UP = 1
-    DOWN = 2
+    _sign: int
+
+    UP = 0, 1
+    DOWN = 1, -1
+
+    # LINK: See: https://stackoverflow.com/a/54732120
+    def __new__(cls, *args) -> "TrendType":
+        obj = object.__new__(cls)
+        obj._value_ = args[0]
+        return obj
+
+    def __init__(self, _: int, sign: int) -> None:
+        self._sign = sign
+
+    @property
+    def sign(self) -> int:
+        return self._sign
 
 
 class Zigzag(DailyAsset):
@@ -76,7 +91,7 @@ class Zigzag(DailyAsset):
                 movement_magnitude = np.random.laplace(*self._trend_movement_dist)
                 if movement_magnitude >= 0:
                     break
-            raw_price *= 1.0 + (1 if trend_type == TrendType.UP else -1) * movement_magnitude
+            raw_price *= 1.0 + trend_type.sign * movement_magnitude
         # Generate candles
         candles: List[DailyCandle] = []
         for date, price in prices:
