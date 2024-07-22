@@ -225,7 +225,7 @@ class DailyAsset(ABC):
     # where there is an option to be randomly chosen within the range of low price to high price.
     def retrieve_historical_prices(
         self, end_date: datetime.date, days_num: int,
-        randomizing_end: bool = True,
+        randomizing_end: bool = False,
     ) -> List[DailyPrice]:
         historical_buffer_days_num, prospective_buffer_days_num = self.calc_buffer_days_num()
         end_index = self.__get_date_index(end_date)

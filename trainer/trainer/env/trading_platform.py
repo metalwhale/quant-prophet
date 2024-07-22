@@ -1,7 +1,7 @@
 import datetime
 import logging
 from collections import defaultdict
-from enum import IntEnum
+from enum import Enum
 from typing import Any, Dict, List, Optional, SupportsFloat, Tuple
 
 import gymnasium as gym
@@ -20,10 +20,25 @@ MONTHLY_TRADABLE_DAYS_NUM = 20
 YEARLY_TRADABLE_DAYS_NUM = 250
 
 
-class PositionType(IntEnum):
-    BUY = 0
-    SELL = 1
-    SIDELINE = 2
+class PositionType(Enum):
+    _sign: int
+
+    BUY = 0, 1
+    SELL = 1, -1
+    SIDELINE = 2, 0
+
+    # LINK: See: https://stackoverflow.com/a/54732120
+    def __new__(cls, *args) -> "PositionType":
+        obj = object.__new__(cls)
+        obj._value_ = args[0]
+        return obj
+
+    def __init__(self, _: int, sign: int) -> None:
+        self._sign = sign
+
+    @property
+    def sign(self) -> int:
+        return self._sign
 
 
 class Position:
@@ -236,14 +251,14 @@ class TradingPlatform(gym.Env):
     def step(self, action: np.int64) -> tuple[Dict[str, Any], SupportsFloat, bool, bool, dict[str, Any]]:
         reward = 0
         # If the position type changes, close the current position and open a new one
-        if len(self._positions) == 0 or action != int(self._positions[-1].position_type):
+        if len(self._positions) == 0 or action != self._positions[-1].position_type.value:
             self._positions.append(Position(
                 self._prices[-1].date,
                 PositionType(action),
                 self._prices[-1].smoothed_price if self.smoothing_position_net else self._prices[-1].actual_price,
                 self._position_amount,
             ))
-            if action != int(PositionType.SIDELINE):
+            if action != PositionType.SIDELINE.value:
                 reward += self._positions[-1].amount * -self._position_opening_penalty  # Opening penalty
         # Recalculate position's net by first reverting net of the current date.
         # The net of the next date will be calculated later.
@@ -401,7 +416,7 @@ class TradingPlatform(gym.Env):
         obs, _ = self.reset()
         # Run one episode
         step = 0
-        action = None
+        action: Optional[PositionType] = None
         while max_step is None or step < max_step:
             if model is not None:
                 # See:
@@ -426,8 +441,8 @@ class TradingPlatform(gym.Env):
                 if abs(action_diff) >= action_diff_threshold or action is None:
                     action = PositionType.BUY if action_diff >= 0 else PositionType.SELL
             else:
-                action = int(np.random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL]))
-            obs, _, terminated, truncated, info = self.step(action)
+                action = np.random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL])
+            obs, _, terminated, truncated, info = self.step(action.value)
             is_end_of_date = info["is_end_of_date"]
             logging.debug("%s %f %f", self._prices[-1].date, self._prices[-1].actual_price, self._balance)
             if is_end_of_date or (stopping_when_done and (terminated or truncated)):
@@ -495,21 +510,17 @@ class TradingPlatform(gym.Env):
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_ema_diffs": np.array([p.ema_diff for p in self._prices]),
-            "position_type": np.array([
+            "position_type": np.array([(
                 self._positions[-1].position_type if len(self._positions) > 0 else PositionType(
                     # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
                     self.np_random.choice([PositionType.BUY, PositionType.SELL])
-                ),
-            ], dtype=int),
+                )
+            ).value], dtype=int),
         }
 
 
 def calc_position_net_ratio(position: Position, price: float) -> float:
-    position_type = position.position_type
-    if position_type == PositionType.SIDELINE:
-        return 0
-    else:
-        return (price / position.entry_price - 1) * (1 if position_type == PositionType.BUY else -1)
+    return position.position_type.sign * (price / position.entry_price - 1)
 
 
 def calc_earning(
