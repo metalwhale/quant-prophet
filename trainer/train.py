@@ -38,8 +38,8 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
         position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
     )
     train_env.is_training = True
-    train_env.smoothing_position_net = True
     train_env.figure_num = "train"
+    train_env.smoothing_position_net = True
     rep_train_env = TradingPlatform(
         train_asset_pool, HISTORICAL_DAYS_NUM,
         position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,

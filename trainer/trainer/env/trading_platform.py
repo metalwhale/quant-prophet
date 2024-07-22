@@ -87,9 +87,10 @@ class TradingPlatform(gym.Env):
 
     # Control flags
     is_training: bool
-    smoothing_position_net: bool
     favorite_symbols: Optional[List[str]]
     figure_num: str
+    smoothing_position_net: bool
+    position_net_ratio_magnitude: Optional[float] = None  # Positive ratio
 
     # Terminology
     # "Episode" and "step":
@@ -187,9 +188,9 @@ class TradingPlatform(gym.Env):
         super().__init__()
         # Control flags
         self.is_training = True
-        self.smoothing_position_net = False
         self.favorite_symbols = None
         self.figure_num = ""
+        self.smoothing_position_net = False
         # Hyperparameters
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
@@ -260,14 +261,27 @@ class TradingPlatform(gym.Env):
             ))
             if action != PositionType.SIDELINE.value:
                 reward += self._positions[-1].amount * -self._position_opening_penalty  # Opening penalty
-        # Recalculate position's net by first reverting net of the current date.
-        # The net of the next date will be calculated later.
-        reward -= self._positions[-1].amount * self._last_position_net_ratio
-        # Move to the next date
-        self._date_index += 1
-        self._retrieve_prices()
-        # TODO: Consider if it is okay to include net of the next date in the reward
-        reward += self._positions[-1].amount * self._last_position_net_ratio  # Net of the next date
+        if self.position_net_ratio_magnitude is None:
+            # Recalculate position's net by first reverting net of the current date.
+            # The net of the next date will be calculated later.
+            reward -= self._positions[-1].amount * self._last_position_net_ratio
+            # Move to the next date
+            self._date_index += 1
+            self._retrieve_prices()
+            # TODO: Consider if it is okay to include net of the next date in the reward
+            reward += self._positions[-1].amount * self._last_position_net_ratio  # Net of the next date
+        else:
+            # Move to the next date
+            self._date_index += 1
+            self._retrieve_prices()
+            reward += (
+                self._positions[-1].amount
+                * self._positions[-1].position_type.sign
+                # NOTE: To avoid indeterministic behavior when `randomizing_end` is set to `True` in `retrieve_historical_prices`,
+                # here we use `smoothed_price` instead of `actual_price` to check if the price is up or down
+                * (1 if self._prices[-1].smoothed_price >= self._prices[-2].smoothed_price else -1)
+                * self.position_net_ratio_magnitude
+            )
         if self._positions[-1].position_type != PositionType.SIDELINE:
             reward += self._positions[-1].amount * -self._position_holding_daily_fee  # Holding fee
         # Treat the balance as a cumulative reward in each episode
