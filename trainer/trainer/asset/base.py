@@ -40,19 +40,17 @@ class DailyCandle:
 
 class DailyIndicator:
     _date: datetime.date
-    _price_range: Tuple[float, float]
-    _actual_price: float   # Close price or a random value between low price and high price
+    _actual_price: float
     _fast_ema: float
     _slow_ema: float
 
     def __init__(
         self,
         date: datetime.date,
-        price_range: Tuple[float, float], actual_price: float,
+        actual_price: float,
         fast_ema: float, slow_ema: float,
     ) -> None:
         self._date = date
-        self._price_range = price_range
         self._actual_price = actual_price
         self._fast_ema = fast_ema
         self._slow_ema = slow_ema
@@ -60,10 +58,6 @@ class DailyIndicator:
     @property
     def date(self) -> datetime.date:
         return self._date
-
-    @property
-    def price_range(self) -> Tuple[float, float]:
-        return self._price_range
 
     @property
     def actual_price(self) -> float:
@@ -83,22 +77,18 @@ class DailyPrice:
     _actual_price: float
     _smoothed_price: float
     _price_delta: float  # Change in price expressed as a ratio compared to the previous day
-    _ema_delta: float  # Change in ema expressed as a ratio compared to the previous day
-    _ema_price_diff: float  # Difference in ratio between ema and price
     _ema_diff: float  # Difference in ratio between ema fast-length and slow-length
 
     def __init__(
         self,
         date: datetime.date,
         actual_price: float, smoothed_price: float,
-        price_delta: float, ema_delta: float, ema_price_diff: float, ema_diff: float,
+        price_delta: float, ema_diff: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
         self._smoothed_price = smoothed_price
         self._price_delta = price_delta
-        self._ema_delta = ema_delta
-        self._ema_price_diff = ema_price_diff
         self._ema_diff = ema_diff
 
     @property
@@ -116,14 +106,6 @@ class DailyPrice:
     @property
     def price_delta(self) -> float:
         return self._price_delta
-
-    @property
-    def ema_delta(self) -> float:
-        return self._ema_delta
-
-    @property
-    def ema_price_diff(self) -> float:
-        return self._ema_price_diff
 
     @property
     def ema_diff(self) -> float:
@@ -216,33 +198,29 @@ class DailyAsset(ABC):
             # See: https://en.wikipedia.org/wiki/Exponential_smoothing
             fast_ema = calc_ema(actual_price, prev_fast_ema, self.__FAST_EMA_LENGTH)
             slow_ema = calc_ema(actual_price, prev_slow_ema, self.__SLOW_EMA_LENGTH)
-            self.__indicators.append(DailyIndicator(candle.date, (low, high), actual_price, fast_ema, slow_ema))
+            self.__indicators.append(DailyIndicator(candle.date, actual_price, fast_ema, slow_ema))
             prev_fast_ema = fast_ema
             prev_slow_ema = slow_ema
 
     # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
     # The actual price used is usually the close price, except for end date,
     # where there is an option to be randomly chosen within the range of low price to high price.
-    def retrieve_historical_prices(
-        self, end_date: datetime.date, days_num: int,
-        randomizing_end: bool = False,
-    ) -> List[DailyPrice]:
+    def retrieve_historical_prices(self, end_date: datetime.date, days_num: int) -> List[DailyPrice]:
         historical_buffer_days_num, prospective_buffer_days_num = self.calc_buffer_days_num()
-        end_index = self.__get_date_index(end_date)
+        end_date_index = self.__get_date_index(end_date)
         if (
-            end_index is None
+            end_date_index is None
             # We need `days_num` days for historical data (including the end date),
             # plus a few buffer days to calculate price deltas and indicators for the start day.
-            or end_index < (days_num - 1) + historical_buffer_days_num
+            or end_date_index < (days_num - 1) + historical_buffer_days_num
             # We need a few buffer days of prospective data to calculate smoothed prices
-            or end_index > (len(self.__indicators) - 1) - prospective_buffer_days_num
+            or end_date_index > (len(self.__indicators) - 1) - prospective_buffer_days_num
         ):
             raise ValueError
-        end_indicator = self.__indicators[end_index]
         prices: List[DailyPrice] = []
         # Historical prices for the days before `end_date`
-        start_date_index = end_index - (days_num - 1)
-        for i in range(start_date_index, end_index):
+        start_date_index = end_date_index - (days_num - 1)
+        for i in range(start_date_index, end_date_index + 1):
             prices.append(DailyPrice(
                 self.__indicators[i].date,
                 self.__indicators[i].actual_price,
@@ -251,49 +229,17 @@ class DailyAsset(ABC):
                     for ind in self.__indicators[i - self.__SMOOTHED_RADIUS:i + self.__SMOOTHED_RADIUS + 1]
                 ]) / (2 * self.__SMOOTHED_RADIUS + 1),
                 self.__indicators[i].actual_price / self.__indicators[i - self.__DELTA_DISTANCE].actual_price - 1,
-                self.__indicators[i].slow_ema / self.__indicators[i - self.__DELTA_DISTANCE].slow_ema - 1,
-                self.__indicators[i].actual_price / self.__indicators[i].slow_ema - 1,
                 self.__indicators[i].fast_ema / self.__indicators[i].slow_ema - 1,
             ))
-        # Price for `end_date`
-        end_actual_price: float
-        if randomizing_end:
-            end_actual_price = np.random.uniform(*end_indicator.price_range)
-        else:
-            end_actual_price = end_indicator.actual_price
-        end_fast_ema = calc_ema(
-            end_actual_price, self.__indicators[end_index - 1].fast_ema,
-            self.__FAST_EMA_LENGTH,
-        )
-        end_slow_ema = calc_ema(
-            end_actual_price, self.__indicators[end_index - 1].slow_ema,
-            self.__SLOW_EMA_LENGTH,
-        )
-        prices.append(DailyPrice(
-            end_indicator.date,
-            end_actual_price,
-            # It's impossible to use a randomized end price to calculate the smoothed price,
-            # so we simply use the value we calculated earlier when preparing the indicators.
-            sum([
-                ind.actual_price
-                for ind in self.__indicators[end_index - self.__SMOOTHED_RADIUS:end_index + self.__SMOOTHED_RADIUS + 1]
-            ]) / (2 * self.__SMOOTHED_RADIUS + 1),
-            # Others
-            end_actual_price / self.__indicators[end_index - self.__DELTA_DISTANCE].actual_price - 1,
-            end_slow_ema / self.__indicators[end_index - self.__DELTA_DISTANCE].slow_ema - 1,
-            end_actual_price / end_slow_ema - 1,
-            end_fast_ema / end_slow_ema - 1,
-        ))
         return prices
 
     @classmethod
     def calc_buffer_days_num(cls) -> Tuple[int, int]:
         # TODO: Add more buffer for MAs
         historical_buffer_days_num = max(
-            # For `DailyIndicator` MAs and `DailyPrice` deltas
-            max(cls.__FAST_EMA_LENGTH, cls.__SLOW_EMA_LENGTH) + cls.__DELTA_DISTANCE,
-            # For `DailyPrice` smoothed prices
-            cls.__SMOOTHED_RADIUS,
+            cls.__SMOOTHED_RADIUS,  # For smoothed prices
+            cls.__DELTA_DISTANCE,  # For price deltas
+            max(cls.__FAST_EMA_LENGTH, cls.__SLOW_EMA_LENGTH),  # For EMA diffs
         )
         prospective_buffer_days_num = cls.__SMOOTHED_RADIUS
         return (historical_buffer_days_num, prospective_buffer_days_num)

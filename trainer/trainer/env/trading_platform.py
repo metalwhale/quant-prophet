@@ -90,7 +90,6 @@ class TradingPlatform(gym.Env):
     favorite_symbols: Optional[List[str]]
     figure_num: str
     smoothing_position_net: bool
-    position_net_ratio_magnitude: Optional[float] = None  # Positive ratio
 
     # Terminology
     # "Episode" and "step":
@@ -261,27 +260,14 @@ class TradingPlatform(gym.Env):
             ))
             if action != PositionType.SIDELINE.value:
                 reward += self._positions[-1].amount * -self._position_opening_penalty  # Opening penalty
-        if self.position_net_ratio_magnitude is None:
-            # Recalculate position's net by first reverting net of the current date.
-            # The net of the next date will be calculated later.
-            reward -= self._positions[-1].amount * self._last_position_net_ratio
-            # Move to the next date
-            self._date_index += 1
-            self._retrieve_prices()
-            # TODO: Consider if it is okay to include net of the next date in the reward
-            reward += self._positions[-1].amount * self._last_position_net_ratio  # Net of the next date
-        else:
-            # Move to the next date
-            self._date_index += 1
-            self._retrieve_prices()
-            reward += (
-                self._positions[-1].amount
-                * self._positions[-1].position_type.sign
-                # NOTE: To avoid indeterministic behavior when `randomizing_end` is set to `True` in `retrieve_historical_prices`,
-                # here we use `smoothed_price` instead of `actual_price` to check if the price is up or down
-                * (1 if self._prices[-1].smoothed_price >= self._prices[-2].smoothed_price else -1)
-                * self.position_net_ratio_magnitude
-            )
+        # Recalculate position's net by first reverting net of the current date.
+        # The net of the next date will be calculated later.
+        reward -= self._positions[-1].amount * self._last_position_net_ratio
+        # Move to the next date
+        self._date_index += 1
+        self._retrieve_prices()
+        # TODO: Consider if it is okay to include net of the next date in the reward
+        reward += self._positions[-1].amount * self._last_position_net_ratio  # Net of the next date
         if self._positions[-1].position_type != PositionType.SIDELINE:
             reward += self._positions[-1].amount * -self._position_holding_daily_fee  # Holding fee
         # Treat the balance as a cumulative reward in each episode
@@ -329,7 +315,6 @@ class TradingPlatform(gym.Env):
             self._date_range[self._date_index],
             # Retrieve all the days before the current date in the date range
             self._date_index + self._historical_days_num,
-            randomizing_end=self.is_training,
         )
         dates = [p.date for p in prices]
         plt.rcParams.update({"font.size": 8})
@@ -515,10 +500,7 @@ class TradingPlatform(gym.Env):
         date = self._date_range[self._date_index]
         if hasattr(self, "_prices") and len(self._prices) > 0 and self._prices[-1].date == date:
             return
-        self._prices = self._asset.retrieve_historical_prices(
-            date, self._historical_days_num,
-            randomizing_end=self.is_training,
-        )
+        self._prices = self._asset.retrieve_historical_prices(date, self._historical_days_num)
 
     def _obtain_observation(self) -> Dict[str, Any]:
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
