@@ -23,6 +23,8 @@ Quantitative strategy using magic based on faith and luck
     python scripts/data_collector/yahoo/collector.py download_data --source_dir /usr/src/quant-prophet/data/stock/input/us --start 1900-01-01 --end 2024-12-31 --delay 1 --interval 1d --region US
     ```
 
+Alternatively, you can download the US stock data from [this mirror URL](https://huggingface.co/datasets/metalwhale/stock_data/blob/e3c9912/us.zip) (updated as of 2024/07/24)
+
 ### Train the agent
 1. Get inside the container:
     ```bash
