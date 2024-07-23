@@ -3,6 +3,8 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
+from ta.trend import EMAIndicator
 
 
 class DailyCandle:
@@ -178,12 +180,11 @@ class DailyAsset(ABC):
 
     def prepare_indicators(self, close_random_radius: Optional[int] = None):
         self.__indicators = []
-        prev_fast_ema: Optional[float] = None
-        prev_slow_ema: Optional[float] = None
+        closes: List[float] = []
         for i, candle in enumerate(self.__candles):
             low = candle.low
             high = candle.high
-            actual_price = candle.close
+            close = candle.close
             if close_random_radius is not None:
                 j = max(i - close_random_radius, 0)
                 low = self.__candles[j].low
@@ -194,13 +195,16 @@ class DailyAsset(ABC):
                     j += 1
                     low = min(low, self.__candles[j].low)
                     high = max(high, self.__candles[j].high)
-                actual_price = np.random.uniform(low, high)
-            # See: https://en.wikipedia.org/wiki/Exponential_smoothing
-            fast_ema = calc_ema(actual_price, prev_fast_ema, self.__FAST_EMA_LENGTH)
-            slow_ema = calc_ema(actual_price, prev_slow_ema, self.__SLOW_EMA_LENGTH)
-            self.__indicators.append(DailyIndicator(candle.date, actual_price, fast_ema, slow_ema))
-            prev_fast_ema = fast_ema
-            prev_slow_ema = slow_ema
+                close = np.random.uniform(low, high)
+            closes.append(close)
+        closes = pd.Series(closes)
+        for (candle, close, fast_ema, slow_ema) in zip(
+            self.__candles,
+            closes,
+            EMAIndicator(closes, window=self.__FAST_EMA_LENGTH).ema_indicator(),
+            EMAIndicator(closes, window=self.__SLOW_EMA_LENGTH).ema_indicator(),
+        ):
+            self.__indicators.append(DailyIndicator(candle.date, close, fast_ema, slow_ema))
 
     # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
     # The actual price used is usually the close price, except for end date,
@@ -239,7 +243,7 @@ class DailyAsset(ABC):
         historical_buffer_days_num = max(
             cls.__SMOOTHED_RADIUS,  # For smoothed prices
             cls.__DELTA_DISTANCE,  # For price deltas
-            max(cls.__FAST_EMA_LENGTH, cls.__SLOW_EMA_LENGTH),  # For EMA diffs
+            max(cls.__FAST_EMA_LENGTH - 1, cls.__SLOW_EMA_LENGTH - 1),  # For EMA diffs
         )
         prospective_buffer_days_num = cls.__SMOOTHED_RADIUS
         return (historical_buffer_days_num, prospective_buffer_days_num)
@@ -264,11 +268,3 @@ class DailyAsset(ABC):
 
     def __get_date_index(self, date: datetime.date) -> Optional[int]:
         return self.__date_indices.get(date.strftime(self.__DATE_FORMAT))
-
-
-def calc_ema(price: float, prev_ema: Optional[float], length: int) -> float:
-    if prev_ema is None:
-        prev_ema = price
-    ema_smoothing_factor = 2 / (length + 1)  # See: https://www.investopedia.com/terms/e/ema.asp
-    ema = ema_smoothing_factor * price + (1 - ema_smoothing_factor) * prev_ema
-    return ema
