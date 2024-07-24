@@ -79,7 +79,7 @@ class DailyPrice:
     _actual_price: float
     _smoothed_price: float
     _price_delta: float  # Change in price expressed as a ratio compared to the previous day
-    _ema_diff: float  # Difference in ratio between ema fast-length and slow-length
+    _ema_diff: float  # Difference in ratio between fast EMA and slow EMA
 
     def __init__(
         self,
@@ -122,8 +122,8 @@ class DailyAsset(ABC):
 
     # NOTE: When adding a new hyperparameter to calculate historical and prospective data,
     # remember to modify `calc_buffer_days_num` method
-    __FAST_EMA_LENGTH = 5  # TODO: Choose a better length
-    __SLOW_EMA_LENGTH = 20  # TODO: Choose a better length (longer than fast-length)
+    __FAST_EMA_WINDOW = 5  # TODO: Choose a better window
+    __SLOW_EMA_WINDOW = 20  # TODO: Choose a better window (longer than fast EMA)
     __SMOOTHED_RADIUS = 2  # TODO: Choose a better number of radius for calculating smoothed prices
     __DELTA_DISTANCE = 1
 
@@ -201,8 +201,8 @@ class DailyAsset(ABC):
         for (candle, close, fast_ema, slow_ema) in zip(
             self.__candles,
             closes,
-            EMAIndicator(closes, window=self.__FAST_EMA_LENGTH).ema_indicator(),
-            EMAIndicator(closes, window=self.__SLOW_EMA_LENGTH).ema_indicator(),
+            EMAIndicator(closes, window=self.__FAST_EMA_WINDOW).ema_indicator(),
+            EMAIndicator(closes, window=self.__SLOW_EMA_WINDOW).ema_indicator(),
         ):
             self.__indicators.append(DailyIndicator(candle.date, close, fast_ema, slow_ema))
 
@@ -243,7 +243,7 @@ class DailyAsset(ABC):
         historical_buffer_days_num = max(
             cls.__SMOOTHED_RADIUS,  # For smoothed prices
             cls.__DELTA_DISTANCE,  # For price deltas
-            max(cls.__FAST_EMA_LENGTH - 1, cls.__SLOW_EMA_LENGTH - 1),  # For EMA diffs
+            max(cls.__FAST_EMA_WINDOW - 1, cls.__SLOW_EMA_WINDOW - 1),  # For EMA diffs
         )
         prospective_buffer_days_num = cls.__SMOOTHED_RADIUS
         return (historical_buffer_days_num, prospective_buffer_days_num)
