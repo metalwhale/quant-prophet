@@ -4,7 +4,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from ta.trend import EMAIndicator
+from ta.momentum import RSIIndicator
+from ta.trend import ADXIndicator, CCIIndicator, EMAIndicator
 
 
 class DailyCandle:
@@ -45,17 +46,24 @@ class DailyIndicator:
     _actual_price: float
     _fast_ema: float
     _slow_ema: float
+    _rsi: float
+    _adx: float
+    _cci: float
 
     def __init__(
         self,
         date: datetime.date,
         actual_price: float,
         fast_ema: float, slow_ema: float,
+        rsi: float, adx: float, cci: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
         self._fast_ema = fast_ema
         self._slow_ema = slow_ema
+        self._rsi = rsi
+        self._adx = adx
+        self._cci = cci
 
     @property
     def date(self) -> datetime.date:
@@ -73,6 +81,18 @@ class DailyIndicator:
     def slow_ema(self) -> float:
         return self._slow_ema
 
+    @property
+    def rsi(self) -> float:
+        return self._rsi
+
+    @property
+    def adx(self) -> float:
+        return self._adx
+
+    @property
+    def cci(self) -> float:
+        return self._cci
+
 
 class DailyPrice:
     _date: datetime.date
@@ -80,18 +100,25 @@ class DailyPrice:
     _smoothed_price: float
     _price_delta: float  # Change in price expressed as a ratio compared to the previous day
     _ema_diff: float  # Difference in ratio between fast EMA and slow EMA
+    _rsi: float
+    _adx: float
+    _cci: float
 
     def __init__(
         self,
         date: datetime.date,
         actual_price: float, smoothed_price: float,
         price_delta: float, ema_diff: float,
+        rsi: float, adx: float, cci: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
         self._smoothed_price = smoothed_price
         self._price_delta = price_delta
         self._ema_diff = ema_diff
+        self._rsi = rsi
+        self._adx = adx
+        self._cci = cci
 
     @property
     def date(self) -> datetime.date:
@@ -113,6 +140,18 @@ class DailyPrice:
     def ema_diff(self) -> float:
         return self._ema_diff
 
+    @property
+    def rsi(self) -> float:
+        return self._rsi
+
+    @property
+    def adx(self) -> float:
+        return self._adx
+
+    @property
+    def cci(self) -> float:
+        return self._cci
+
 
 class DailyAsset(ABC):
     __symbol: str
@@ -122,10 +161,13 @@ class DailyAsset(ABC):
 
     # NOTE: When adding a new hyperparameter to calculate historical and prospective data,
     # remember to modify `calc_buffer_days_num` method
-    __FAST_EMA_WINDOW = 5  # TODO: Choose a better window
-    __SLOW_EMA_WINDOW = 20  # TODO: Choose a better window (longer than fast EMA)
     __SMOOTHED_RADIUS = 2  # TODO: Choose a better number of radius for calculating smoothed prices
     __DELTA_DISTANCE = 1
+    __FAST_EMA_WINDOW = 5  # TODO: Choose a better window
+    __SLOW_EMA_WINDOW = 20  # TODO: Choose a better window (longer than fast EMA)
+    __RSI_WINDOW = 14  # TODO: Choose a better window
+    __ADX_WINDOW = 14  # TODO: Choose a better window
+    __CCI_WINDOW = 20  # TODO: Choose a better window
 
     __DATE_FORMAT = "%Y-%m-%d"
 
@@ -180,6 +222,8 @@ class DailyAsset(ABC):
 
     def prepare_indicators(self, close_random_radius: Optional[int] = None):
         self.__indicators = []
+        highs: List[float] = []
+        lows: List[float] = []
         closes: List[float] = []
         for i, candle in enumerate(self.__candles):
             low = candle.low
@@ -196,15 +240,23 @@ class DailyAsset(ABC):
                     low = min(low, self.__candles[j].low)
                     high = max(high, self.__candles[j].high)
                 close = np.random.uniform(low, high)
+            highs.append(high)
+            lows.append(low)
             closes.append(close)
+        highs = pd.Series(highs)
+        lows = pd.Series(lows)
         closes = pd.Series(closes)
-        for (candle, close, fast_ema, slow_ema) in zip(
+        for (candle, close, fast_ema, slow_ema, rsi, adx, cci) in zip(
             self.__candles,
             closes,
             EMAIndicator(closes, window=self.__FAST_EMA_WINDOW).ema_indicator(),
             EMAIndicator(closes, window=self.__SLOW_EMA_WINDOW).ema_indicator(),
+            RSIIndicator(closes, window=self.__RSI_WINDOW).rsi(),
+            ADXIndicator(highs, lows, closes, window=self.__ADX_WINDOW).adx(),
+            CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci(),
+            strict=True,
         ):
-            self.__indicators.append(DailyIndicator(candle.date, close, fast_ema, slow_ema))
+            self.__indicators.append(DailyIndicator(candle.date, close, fast_ema, slow_ema, rsi, adx, cci))
 
     # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
     # The actual price used is usually the close price, except for end date,
@@ -234,16 +286,22 @@ class DailyAsset(ABC):
                 ]) / (2 * self.__SMOOTHED_RADIUS + 1),
                 self.__indicators[i].actual_price / self.__indicators[i - self.__DELTA_DISTANCE].actual_price - 1,
                 self.__indicators[i].fast_ema / self.__indicators[i].slow_ema - 1,
+                self.__indicators[i].rsi,
+                self.__indicators[i].adx,
+                self.__indicators[i].cci,
             ))
         return prices
 
     @classmethod
     def calc_buffer_days_num(cls) -> Tuple[int, int]:
-        # TODO: Add more buffer for MAs
+        # TODO: Check if these buffers are properly selected
         historical_buffer_days_num = max(
             cls.__SMOOTHED_RADIUS,  # For smoothed prices
             cls.__DELTA_DISTANCE,  # For price deltas
-            max(cls.__FAST_EMA_WINDOW - 1, cls.__SLOW_EMA_WINDOW - 1),  # For EMA diffs
+            max(cls.__FAST_EMA_WINDOW - 1, cls.__SLOW_EMA_WINDOW - 1),  # For EMA diffs' first `nan`s
+            cls.__RSI_WINDOW - 1,  # For RSI's first `nan`s
+            cls.__ADX_WINDOW * 2 - 1,  # For ADX's first `0`s
+            cls.__CCI_WINDOW - 1,  # For CCI's first `nan`s
         )
         prospective_buffer_days_num = cls.__SMOOTHED_RADIUS
         return (historical_buffer_days_num, prospective_buffer_days_num)

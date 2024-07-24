@@ -213,6 +213,9 @@ class TradingPlatform(gym.Env):
             # Suppose that delta values (ratios) are greater than -1 and less than 1,
             # meaning prices and other indicators never drop to 0 and never double from previous day.
             "historical_ema_diffs": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            "historical_rsis": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
+            "historical_adxs": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
+            "historical_ccis": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             # Position types have the same values as action space.
             "position_type": gym.spaces.Discrete(len(PositionType)),
         })
@@ -322,15 +325,15 @@ class TradingPlatform(gym.Env):
             # LINK: `num` and `clear` help prevent memory leak (See: https://stackoverflow.com/a/65910539)
             num=f"trading_platform.{self.figure_num}",
             # NOTE: Remember to increase the height of `figsize` if you add more plots
-            figsize=(len(dates) / YEARLY_TRADABLE_DAYS_NUM * YEAR_WIDTH, 4 * SUBPLOT_HEIGHT),
+            figsize=(len(dates) / YEARLY_TRADABLE_DAYS_NUM * YEAR_WIDTH, 6 * SUBPLOT_HEIGHT),
             dpi=400,
             clear=True,
         )
-        figure.subplots_adjust(left=100 / len(dates), bottom=0.1, right=0.99, top=0.9)
-        all_axes: List[Tuple[Axes, Dict[datetime.date, float]]] = []
+        figure.subplots_adjust(left=100 / len(dates), bottom=0.02, right=0.99, top=0.95)
+        all_axes: List[Tuple[str, Axes, Dict[datetime.date, float]]] = []
         # Plot prices
-        axes = figure.add_subplot(411)
-        all_axes.append((axes, {p.date: p.actual_price for p in prices}))
+        axes = figure.add_subplot(611)
+        all_axes.append(("Prices", axes, {p.date: p.actual_price for p in prices}))
         position_index: Optional[int] = None
         date_prices: List[Tuple[datetime.date, float]] = []
         for i, price in enumerate(prices):
@@ -364,25 +367,34 @@ class TradingPlatform(gym.Env):
                 # Move to next position
                 position_index = next_position_index
                 date_prices = [date_price]
-        # Plot smoothed prices
-        axes = figure.add_subplot(412)
-        all_axes.append((axes, {p.date: p.smoothed_price for p in prices}))
-        axes.plot(dates, [p.smoothed_price if p.date in dates else None for p in prices])
         # Plot EMA diffs
-        axes = figure.add_subplot(413)
-        all_axes.append((axes, {p.date: p.ema_diff for p in prices}))
+        axes = figure.add_subplot(612)
+        all_axes.append(("EMA diffs", axes, {p.date: p.ema_diff for p in prices}))
         axes.plot(dates, [0 for _ in dates], color="gray")
         axes.plot(dates, [p.ema_diff if p.date in dates else None for p in prices], color="orange")
+        # Plot RSIs
+        axes = figure.add_subplot(613)
+        all_axes.append(("RSIs", axes, {p.date: p.rsi for p in prices}))
+        axes.plot(dates, [p.rsi if p.date in dates else None for p in prices])
+        # Plot ADXs
+        axes = figure.add_subplot(614)
+        all_axes.append(("ADXs", axes, {p.date: p.adx for p in prices}))
+        axes.plot(dates, [p.adx if p.date in dates else None for p in prices])
+        # Plot CCIs
+        axes = figure.add_subplot(615)
+        all_axes.append(("CCIs", axes, {p.date: p.cci for p in prices}))
+        axes.plot(dates, [p.cci if p.date in dates else None for p in prices])
         # Plot action values
         action_values = self._extra_info.action_values
-        axes = figure.add_subplot(414)
-        all_axes.append((axes, {d: v[2] for d, v in action_values.items()}))
+        axes = figure.add_subplot(616)
+        all_axes.append(("Action values", axes, {d: v[2] for d, v in action_values.items()}))
         axes.plot(dates, [0 for _ in dates], color="gray")
         axes.plot(dates, [action_values[d][0] if d in action_values else None for d in dates], color="green", alpha=0.2)
         axes.plot(dates, [action_values[d][1] if d in action_values else None for d in dates], color="red", alpha=0.2)
         axes.plot(dates, [action_values[d][2] if d in action_values else None for d in dates], color="orange")
         # Common plots for all axes
-        for axes, position_values in all_axes:
+        for title, axes, position_values in all_axes:
+            axes.set_title(title)
             # Plot positions
             for position in self._positions:
                 is_buy = position.position_type == PositionType.BUY
@@ -506,6 +518,9 @@ class TradingPlatform(gym.Env):
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_ema_diffs": np.array([p.ema_diff for p in self._prices]),
+            "historical_rsis": np.array([p.rsi / 100 for p in self._prices]),  # RSI range between 0 and 100
+            "historical_adxs": np.array([p.adx / 100 for p in self._prices]),  # ADX range between 0 and 100
+            "historical_ccis": np.array([p.cci / 400 for p in self._prices]),  # TODO: Choose a better bound for CCI
             "position_type": np.array([(
                 self._positions[-1].position_type if len(self._positions) > 0 else PositionType(
                     # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
