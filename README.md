@@ -14,6 +14,7 @@ Quantitative strategy using magic based on faith and luck
     ```
 
 ### Collect the data
+#### US stock data
 1. Get inside the container:
     ```bash
     docker compose exec collector bash
@@ -24,6 +25,12 @@ Quantitative strategy using magic based on faith and luck
     ```
 
 Alternatively, you can download the US stock data from [this mirror URL](https://huggingface.co/datasets/metalwhale/stock_data/blob/e3c9912/us.zip) (updated as of 2024/07/24)
+
+#### List of S&P 500 companies
+1. Run the command (outside the container):
+    ```bash
+    curl https://raw.githubusercontent.com/datasets/s-and-p-500-companies/c7fb58f/data/constituents.csv -o ./data/stock/input/sp500.csv
+    ```
 
 ### Train the agent
 1. Get inside the container:

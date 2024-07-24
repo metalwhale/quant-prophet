@@ -170,7 +170,7 @@ class TradingPlatform(gym.Env):
     # Here, all set to 1 for simplicity.
     _POSITION_AMOUNT_UNIT: float = 100.0  # Equal to or less than the initial balance
     _INITIAL_BALANCE_UNIT: float = 100.0
-    _ASSET_TYPE_WEIGHTS: Tuple[float, float] = [0.0, 1.0]  # (primary, secondary)
+    _ASSET_TYPE_WEIGHTS: Tuple[float, float] = [1.0, 0.0]  # (primary, secondary)
     _CLOSE_RANDOM_RADIUS: Optional[int] = 0
 
     def __init__(
