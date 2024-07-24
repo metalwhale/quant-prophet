@@ -252,6 +252,10 @@ class DailyAsset(ABC):
     def symbol(self) -> str:
         return self.__symbol
 
+    @property
+    def published_date(self) -> datetime.date:
+        return self.__candles[0].date
+
     # Remember to call this method in the inheritance class to fetch candles
     def _initialize(self):
         self.__candles = self._fetch_candles()
