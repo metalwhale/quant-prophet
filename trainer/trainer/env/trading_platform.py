@@ -460,22 +460,20 @@ class TradingPlatform(gym.Env):
                 break
             step += 1
         rendered = self.render() if rendering else None
-        # Calculate the balance
-        calculated_balance = self._initial_balance
-        earning, price_change, wl_rate = calc_earning(
+        # Calculate the earning
+        calculated_earning, price_change, wl_rate = calc_earning(
             self._positions, self._prices[-1],
             # TODO: Include fees even if not in training mode
             position_holding_daily_fee=self._position_holding_daily_fee if self.is_training else 0,
             position_opening_penalty=self._position_opening_penalty if self.is_training else 0,
             smoothing_position_net=self.smoothing_position_net,
         )
-        calculated_balance += earning
         logging.debug("%s %f", self._prices[-1].date, self._prices[-1].actual_price)
-        platform_balance = self._balance
-        # Platform balance and self-calculated balance should be equal
+        # Platform earning and self-calculated earning should be equal
+        platform_earning = self._balance - self._initial_balance
         return (
             rendered,
-            (platform_balance, calculated_balance, price_change, wl_rate),
+            (platform_earning, calculated_earning, price_change, wl_rate),
             (self._positions, self._prices[-1]),
         )
 
@@ -489,13 +487,11 @@ class TradingPlatform(gym.Env):
 
     @property
     def _position_amount(self) -> float:
-        # Unit price is mainly used for training, whereas using actual price as a position amount often implies evaluation
-        return self._POSITION_AMOUNT_UNIT if self.is_training else self._prices[-1].actual_price
+        return self._POSITION_AMOUNT_UNIT
 
     @property
     def _initial_balance(self) -> float:
-        # A zero initial balance may seem illogical, but in evaluation, only earnings matter, not the initial balance
-        return self._INITIAL_BALANCE_UNIT if self.is_training else 0
+        return self._INITIAL_BALANCE_UNIT
 
     @property
     def _last_position_net_ratio(self) -> float:
