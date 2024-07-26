@@ -98,8 +98,8 @@ class DailyPrice:
     _date: datetime.date
     _actual_price: float
     _smoothed_price: float
-    _price_delta: float  # Change in price expressed as a ratio compared to the previous day
-    _ema_diff: float  # Difference in ratio between fast EMA and slow EMA
+    _price_delta_ratio: float  # Change in price expressed as a ratio compared to the previous day
+    _ema_diff_ratio: float  # Difference in ratio between fast EMA and slow EMA
     _rsi: float
     _adx: float
     _cci: float
@@ -108,14 +108,14 @@ class DailyPrice:
         self,
         date: datetime.date,
         actual_price: float, smoothed_price: float,
-        price_delta: float, ema_diff: float,
+        price_delta_ratio: float, ema_diff_ratio: float,
         rsi: float, adx: float, cci: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
         self._smoothed_price = smoothed_price
-        self._price_delta = price_delta
-        self._ema_diff = ema_diff
+        self._price_delta_ratio = price_delta_ratio
+        self._ema_diff_ratio = ema_diff_ratio
         self._rsi = rsi
         self._adx = adx
         self._cci = cci
@@ -133,12 +133,12 @@ class DailyPrice:
         return self._smoothed_price
 
     @property
-    def price_delta(self) -> float:
-        return self._price_delta
+    def price_delta_ratio(self) -> float:
+        return self._price_delta_ratio
 
     @property
-    def ema_diff(self) -> float:
-        return self._ema_diff
+    def ema_diff_ratio(self) -> float:
+        return self._ema_diff_ratio
 
     @property
     def rsi(self) -> float:
@@ -213,8 +213,8 @@ class DailyAsset(ABC):
             date_range.append(date)
         return date_range
 
-    # TODO: Use `self.__indicators` instead of `self.__candles` when retrieving price deltas
-    def retrieve_price_delta(self, date: datetime.date) -> Optional[float]:
+    # TODO: Use `self.__indicators` instead of `self.__candles` when retrieving price delta ratios
+    def retrieve_price_delta_ratio(self, date: datetime.date) -> Optional[float]:
         date_index = self.__get_date_index(date)
         if date_index is None or date_index < self.__DELTA_DISTANCE:
             return None
@@ -267,7 +267,7 @@ class DailyAsset(ABC):
         if (
             end_date_index is None
             # We need `days_num` days for historical data (including the end date),
-            # plus a few buffer days to calculate price deltas and indicators for the start day.
+            # plus a few buffer days to calculate price delta ratios and indicators for the start day.
             or end_date_index < (days_num - 1) + historical_buffer_days_num
             # We need a few buffer days of prospective data to calculate smoothed prices
             or end_date_index > (len(self.__indicators) - 1) - prospective_buffer_days_num
@@ -297,8 +297,8 @@ class DailyAsset(ABC):
         # TODO: Check if these buffers are properly selected
         historical_buffer_days_num = max(
             cls.__SMOOTHED_RADIUS,  # For smoothed prices
-            cls.__DELTA_DISTANCE,  # For price deltas
-            max(cls.__FAST_EMA_WINDOW - 1, cls.__SLOW_EMA_WINDOW - 1),  # For EMA diffs' first `nan`s
+            cls.__DELTA_DISTANCE,  # For price delta ratios
+            max(cls.__FAST_EMA_WINDOW - 1, cls.__SLOW_EMA_WINDOW - 1),  # For EMA diff ratios' first `nan`s
             cls.__RSI_WINDOW - 1,  # For RSI's first `nan`s
             cls.__ADX_WINDOW * 2 - 1,  # For ADX's first `0`s
             cls.__CCI_WINDOW - 1,  # For CCI's first `nan`s

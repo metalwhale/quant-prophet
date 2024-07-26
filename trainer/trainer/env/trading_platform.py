@@ -210,9 +210,10 @@ class TradingPlatform(gym.Env):
         # knowing "where" the current state is relatively located in an episode is critically required.
         # In my best guess, this can be solved by adding information about current balance or the position we are holding.
         self.observation_space = gym.spaces.Dict({
-            # Suppose that delta values (ratios) are greater than -1 and less than 1,
+            # Suppose that delta and diff values (ratios) are greater than -1 and less than 1,
             # meaning prices and other indicators never drop to 0 and never double from previous day.
-            "historical_ema_diffs": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            "historical_price_delta_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            "historical_ema_diff_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             "historical_rsis": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
             "historical_adxs": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
             "historical_ccis": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
@@ -247,7 +248,7 @@ class TradingPlatform(gym.Env):
         info = {}
         if self.is_training:
             self._date_chosen_counter[self._date_range[self._date_index]][self._asset_symbol] += 1
-            self._polarity_diff += calc_polarity_diff(self._prices[-1].price_delta)
+            self._polarity_diff += calc_polarity_diff(self._prices[-1].price_delta_ratio)
         self._extra_info = self.ExtraInfo()
         return observation, info
 
@@ -305,7 +306,7 @@ class TradingPlatform(gym.Env):
             "is_end_of_date": is_end_of_date,
         }
         if self.is_training:
-            self._polarity_diff += calc_polarity_diff(self._prices[-1].price_delta)
+            self._polarity_diff += calc_polarity_diff(self._prices[-1].price_delta_ratio)
         return observation, reward, terminated, truncated, info
 
     def render(self) -> Any | List[Any] | None:
@@ -367,11 +368,11 @@ class TradingPlatform(gym.Env):
                 # Move to next position
                 position_index = next_position_index
                 date_prices = [date_price]
-        # Plot EMA diffs
+        # Plot EMA diff ratios
         axes = figure.add_subplot(612)
-        all_axes.append(("EMA diffs", axes, {p.date: p.ema_diff for p in prices}))
+        all_axes.append(("EMA diff ratios", axes, {p.date: p.ema_diff_ratio for p in prices}))
         axes.plot(dates, [0 for _ in dates], color="gray")
-        axes.plot(dates, [p.ema_diff if p.date in dates else None for p in prices], color="orange")
+        axes.plot(dates, [p.ema_diff_ratio if p.date in dates else None for p in prices], color="orange")
         # Plot RSIs
         axes = figure.add_subplot(613)
         all_axes.append(("RSIs", axes, {p.date: p.rsi for p in prices}))
@@ -513,7 +514,8 @@ class TradingPlatform(gym.Env):
     def _obtain_observation(self) -> Dict[str, Any]:
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
-            "historical_ema_diffs": np.array([p.ema_diff for p in self._prices]),
+            "historical_price_delta_ratios": np.array([p.price_delta_ratio for p in self._prices]),
+            "historical_ema_diff_ratios": np.array([p.ema_diff_ratio for p in self._prices]),
             "historical_rsis": np.array([p.rsi / 100 for p in self._prices]),  # RSI range between 0 and 100
             "historical_adxs": np.array([p.adx / 100 for p in self._prices]),  # ADX range between 0 and 100
             "historical_ccis": np.array([p.cci / 400 for p in self._prices]),  # TODO: Choose a better bound for CCI

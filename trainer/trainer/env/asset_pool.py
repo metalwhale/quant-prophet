@@ -169,8 +169,8 @@ class AssetPool:
         return self._secondary_asset_generator is not None
 
 
-def calc_polarity_diff(price_delta: float) -> int:
-    return 1 if price_delta >= 0 else -1
+def calc_polarity_diff(price_delta_ratio: float) -> int:
+    return 1 if price_delta_ratio >= 0 else -1
 
 
 def _map_to_date_polarity(
@@ -182,19 +182,19 @@ def _map_to_date_polarity(
     # First, we iterate over all dates in the date range and calculate the cumulative polarity diff,
     # so that it is the sum of at most `ahead_days_num + 1` polarity diffs (`ahead_days_num` dates before and 1 current date).
     for i in range(len(date_range)):
-        diff += calc_polarity_diff(asset.retrieve_price_delta(date_range[i]))
+        diff += calc_polarity_diff(asset.retrieve_price_delta_ratio(date_range[i]))
         if i >= ahead_days_num:
             # Assign the sum of polarity diffs to the date `ahead_days_num` days ago
             date = date_range[i - ahead_days_num]
             asset_polarities.append(DatePolarity(date, diff))
             # Remove the oldest diff before moving to the next date
-            diff -= calc_polarity_diff(asset.retrieve_price_delta(date))
+            diff -= calc_polarity_diff(asset.retrieve_price_delta_ratio(date))
     # Finally, we iterate through the remaining dates within the `ahead_days_num` date range from the last date
     for i in range(max(0, len(date_range) - ahead_days_num), len(date_range)):
         date = date_range[i]
         asset_polarities.append(DatePolarity(date, diff))
         # Remove the oldest diff before moving to the next date
-        diff -= calc_polarity_diff(asset.retrieve_price_delta(date))
+        diff -= calc_polarity_diff(asset.retrieve_price_delta_ratio(date))
     return asset_polarities
 
 
