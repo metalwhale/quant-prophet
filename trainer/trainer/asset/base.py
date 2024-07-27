@@ -213,13 +213,6 @@ class DailyAsset(ABC):
             date_range.append(date)
         return date_range
 
-    # TODO: Use `self.__indicators` instead of `self.__candles` when retrieving price delta ratios
-    def retrieve_price_delta_ratio(self, date: datetime.date) -> Optional[float]:
-        date_index = self.__get_date_index(date)
-        if date_index is None or date_index < self.__DELTA_DISTANCE:
-            return None
-        return self.__candles[date_index].close / self.__candles[date_index - self.__DELTA_DISTANCE].close - 1
-
     def prepare_indicators(self, close_random_radius: Optional[int] = None):
         self.__indicators = []
         highs: List[float] = []

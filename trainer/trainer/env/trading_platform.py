@@ -1,6 +1,5 @@
 import datetime
 import logging
-from collections import defaultdict
 from enum import Enum
 from typing import Any, Dict, List, Optional, SupportsFloat, Tuple
 
@@ -13,7 +12,7 @@ from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3 import DQN
 
 from ..asset.base import DailyAsset, DailyPrice
-from .asset_pool import AssetPool, calc_polarity_diff
+from .asset_pool import AssetPool
 
 
 MONTHLY_TRADABLE_DAYS_NUM = 20
@@ -150,9 +149,6 @@ class TradingPlatform(gym.Env):
     _max_steps_num: Optional[int]  # Maximum number of steps allowed in one episode
 
     # State components
-    # Platform-level, only changed if we refresh
-    _polarity_diff: int
-    _date_chosen_counter: Dict[datetime.date, Dict[str, int]]  # Metadata
     # Episode-level, only changed if we reset to begin a new episode
     _asset_symbol: str  # Symbol of the current asset
     _date_range: List[datetime.date]  # The random date range of each episode
@@ -220,8 +216,6 @@ class TradingPlatform(gym.Env):
             # Position types have the same values as action space.
             "position_type": gym.spaces.Discrete(len(PositionType)),
         })
-        # Refresh platform-level state components
-        self.refresh()
 
     def reset(
         self, *,
@@ -246,9 +240,6 @@ class TradingPlatform(gym.Env):
         self._balance = self._initial_balance
         observation = self._obtain_observation()
         info = {}
-        if self.is_training:
-            self._date_chosen_counter[self._date_range[self._date_index]][self._asset_symbol] += 1
-            self._polarity_diff += calc_polarity_diff(self._prices[-1].price_delta_ratio)
         self._extra_info = self.ExtraInfo()
         return observation, info
 
@@ -305,8 +296,6 @@ class TradingPlatform(gym.Env):
         info = {
             "is_end_of_date": is_end_of_date,
         }
-        if self.is_training:
-            self._polarity_diff += calc_polarity_diff(self._prices[-1].price_delta_ratio)
         return observation, reward, terminated, truncated, info
 
     def render(self) -> Any | List[Any] | None:
@@ -411,10 +400,6 @@ class TradingPlatform(gym.Env):
         image = np.frombuffer(figure.canvas.tostring_rgb(), dtype=np.uint8) \
             .reshape(figure.canvas.get_width_height()[::-1] + (3,))
         return image
-
-    def refresh(self):
-        self._polarity_diff = 0
-        self._date_chosen_counter = defaultdict(lambda: defaultdict(int))
 
     def trade(
         self,

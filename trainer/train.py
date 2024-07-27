@@ -29,10 +29,7 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
     POSITION_OPENING_PENALTY = 0.0
     # Training environment
     train_asset_pool = AssetPool(assets)
-    train_asset_pool.apply_date_range(
-        (FIRST_TRAINING_DATE, LAST_TRAINING_DATE), HISTORICAL_DAYS_NUM,
-        ahead_days_num=YEARLY_TRADABLE_DAYS_NUM,  # TODO: Choose the same value as `train_env._max_steps_num`
-    )
+    train_asset_pool.apply_date_range((FIRST_TRAINING_DATE, LAST_TRAINING_DATE), HISTORICAL_DAYS_NUM)
     train_env = TradingPlatform(
         train_asset_pool, HISTORICAL_DAYS_NUM,
         position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
