@@ -142,12 +142,6 @@ class TradingPlatform(gym.Env):
     # i.e., increasing the opening penalty means the model may learn to open fewer positions.
     _position_opening_penalty: float  # Positive ratio
 
-    # Hyperparameters for termination and truncation
-    _max_balance_loss: Optional[float]  # Positive ratio
-    _max_balance_gain: Optional[float]  # Positive ratio
-    _max_positions_num: Optional[int]  # Maximum number of positions (greater than 1) allowed in one episode
-    _max_steps_num: Optional[int]  # Maximum number of steps allowed in one episode
-
     # State components
     # Episode-level, only changed if we reset to begin a new episode
     _asset_symbol: str  # Symbol of the current asset
@@ -175,10 +169,6 @@ class TradingPlatform(gym.Env):
         historical_days_num: int,
         position_holding_daily_fee: float = 0.0,
         position_opening_penalty: float = 0.0,
-        max_balance_loss: Optional[float] = None,
-        max_balance_gain: Optional[float] = None,
-        max_positions_num: Optional[int] = None,
-        max_steps_num: Optional[int] = None,
     ) -> None:
         super().__init__()
         # Control flags
@@ -193,10 +183,6 @@ class TradingPlatform(gym.Env):
         # by calculating reward and determining whether to terminate an episode.
         self._position_holding_daily_fee = position_holding_daily_fee
         self._position_opening_penalty = position_opening_penalty
-        self._max_balance_loss = max_balance_loss
-        self._max_balance_gain = max_balance_gain
-        self._max_positions_num = max_positions_num
-        self._max_steps_num = max_steps_num
         # Environment
         # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
         self.action_space = gym.spaces.Discrete(len(PositionType) - 1)
@@ -274,23 +260,7 @@ class TradingPlatform(gym.Env):
         terminated = False
         # Truncation conditions
         is_end_of_date = self._date_index >= len(self._date_range) - 1
-        truncated = (
-            # Reaching the end of training date
-            is_end_of_date
-            # Liquidated
-            or (
-                self._max_balance_loss is not None
-                and self._balance < self._initial_balance * (1 - self._max_balance_loss)
-            )
-            # Realizing profits
-            or (
-                self._max_balance_gain is not None
-                and self._balance >= self._initial_balance * (1 + self._max_balance_gain)
-            )
-            # Other conditions
-            or (self._max_positions_num is not None and len(self._positions) >= self._max_positions_num)
-            or (self._max_steps_num is not None and self._date_index >= self._max_steps_num)
-        )
+        truncated = is_end_of_date  # Reaching the end of training date
         # Observation and additional info
         observation = self._obtain_observation()
         info = {
