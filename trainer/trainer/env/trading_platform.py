@@ -129,18 +129,9 @@ class TradingPlatform(gym.Env):
     #                          |
     #                          Episode's "first date", randomly chosen within training data's date range
 
+    # Parameters
     _asset_pool: AssetPool
     _historical_days_num: int  # Number of days used for retrieving historical data
-
-    # Hyperparameters for calculating rewards
-    # TODO: Reconsider the meaning of the daily fee.
-    # Its sole purpose currently seems to be only preventing holding a position too long, causing a loss before earning.
-    # Does it still make sense since we are always holding every day?
-    _position_holding_daily_fee: float  # Positive ratio
-    # TODO: Reconsider the meaning of the opening penalty.
-    # I believe that changing the opening penalty affects how often new positions are opened,
-    # i.e., increasing the opening penalty means the model may learn to open fewer positions.
-    _position_opening_penalty: float  # Positive ratio
 
     # State components
     # Episode-level, only changed if we reset to begin a new episode
@@ -167,8 +158,6 @@ class TradingPlatform(gym.Env):
         self,
         asset_pool: AssetPool,
         historical_days_num: int,
-        position_holding_daily_fee: float = 0.0,
-        position_opening_penalty: float = 0.0,
     ) -> None:
         super().__init__()
         # Control flags
@@ -176,13 +165,9 @@ class TradingPlatform(gym.Env):
         self.favorite_symbols = None
         self.figure_num = ""
         self.smoothing_position_net = False
-        # Hyperparameters
+        # Parameters
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
-        # These following hyperparameters are mainly used only for training,
-        # by calculating reward and determining whether to terminate an episode.
-        self._position_holding_daily_fee = position_holding_daily_fee
-        self._position_opening_penalty = position_opening_penalty
         # Environment
         # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
         self.action_space = gym.spaces.Discrete(len(PositionType) - 1)
@@ -239,8 +224,6 @@ class TradingPlatform(gym.Env):
                 self._prices[-1].smoothed_price if self.smoothing_position_net else self._prices[-1].actual_price,
                 self._position_amount,
             ))
-            if action != PositionType.SIDELINE.value:
-                reward += self._positions[-1].amount * -self._position_opening_penalty  # Opening penalty
         # Recalculate position's net by first reverting net of the current date.
         # The net of the next date will be calculated later.
         reward -= self._positions[-1].amount * self._last_position_net_ratio
@@ -249,8 +232,6 @@ class TradingPlatform(gym.Env):
         self._retrieve_prices()
         # TODO: Consider if it is okay to include net of the next date in the reward
         reward += self._positions[-1].amount * self._last_position_net_ratio  # Net of the next date
-        if self._positions[-1].position_type != PositionType.SIDELINE:
-            reward += self._positions[-1].amount * -self._position_holding_daily_fee  # Holding fee
         # Treat the balance as a cumulative reward in each episode
         self._balance += reward
         # Read more about termination and truncation at:
@@ -419,9 +400,6 @@ class TradingPlatform(gym.Env):
         # Calculate the earning
         calculated_earning, price_change, wl_rate = calc_earning(
             self._positions, self._prices[-1],
-            # TODO: Include fees even if not in training mode
-            position_holding_daily_fee=self._position_holding_daily_fee if self.is_training else 0,
-            position_opening_penalty=self._position_opening_penalty if self.is_training else 0,
             smoothing_position_net=self.smoothing_position_net,
         )
         logging.debug("%s %f", self._prices[-1].date, self._prices[-1].actual_price)
@@ -489,7 +467,6 @@ def calc_position_net_ratio(position: Position, price: float) -> float:
 
 def calc_earning(
     positions: List[Position], final_price: DailyPrice,
-    position_holding_daily_fee: float = 0.0, position_opening_penalty: float = 0.0,
     smoothing_position_net: bool = False,
 ) -> Tuple[float, float, float]:
     if len(positions) < 1 or positions[-1].date > final_price.date:
@@ -504,13 +481,6 @@ def calc_earning(
         position_net_ratios.append(position_net_ratio)
         price_change_ratios.append(cur_position.entry_price / prev_position.entry_price - 1)
         earning += prev_position.amount * position_net_ratio
-        if prev_position.position_type != PositionType.SIDELINE:
-            # Holding fee
-            earning += (cur_position.date - prev_position.date).days \
-                * prev_position.amount * -position_holding_daily_fee
-            # TODO: Skip calculating penalties when evaluating
-            # Opening penalty
-            earning += prev_position.amount * -position_opening_penalty
         logging.debug("%s %f %s", prev_position.date, prev_position.entry_price, prev_position.position_type)
     # Reward of the last position
     last_position_net_ratio = calc_position_net_ratio(
@@ -520,9 +490,6 @@ def calc_earning(
     position_net_ratios.append(last_position_net_ratio)
     price_change_ratios.append(final_price.actual_price / positions[-1].entry_price - 1)
     earning += positions[-1].amount * last_position_net_ratio
-    if positions[-1].position_type != PositionType.SIDELINE:
-        earning += (final_price.date - positions[-1].date).days * positions[-1].amount * -position_holding_daily_fee
-        earning += positions[-1].amount * -position_opening_penalty
     logging.debug("%s %f %s", positions[-1].date, positions[-1].entry_price, positions[-1].position_type)
     # Price change equals a BUY position, hence `1` instead of `-1`
     price_change = positions[0].amount * 1 * (final_price.actual_price / positions[0].entry_price - 1)

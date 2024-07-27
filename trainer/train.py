@@ -10,7 +10,7 @@ from trainer.asset.base import DailyAsset
 from trainer.asset.stock import Stock, StockIndex
 from trainer.asset.zigzag import Zigzag
 from trainer.env.asset_pool import AssetPool
-from trainer.env.trading_platform import MONTHLY_TRADABLE_DAYS_NUM, YEARLY_TRADABLE_DAYS_NUM, TradingPlatform
+from trainer.env.trading_platform import MONTHLY_TRADABLE_DAYS_NUM, TradingPlatform
 from trainer.env.evaluation import FullEvalCallback
 
 
@@ -24,22 +24,13 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
     HISTORICAL_DAYS_NUM = MONTHLY_TRADABLE_DAYS_NUM * 6
     assets = [a for a in assets if a.published_date <= FIRST_TRAINING_DATE]
     assets.sort(key=lambda asset: asset.symbol)
-    YEARLY_INTEREST_RATE = 0.0  # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
-    POSITION_HOLDING_DAILY_FEE = YEARLY_INTEREST_RATE / YEARLY_TRADABLE_DAYS_NUM
-    POSITION_OPENING_PENALTY = 0.0
     # Training environment
     train_asset_pool = AssetPool(assets)
     train_asset_pool.apply_date_range((FIRST_TRAINING_DATE, LAST_TRAINING_DATE), HISTORICAL_DAYS_NUM)
-    train_env = TradingPlatform(
-        train_asset_pool, HISTORICAL_DAYS_NUM,
-        position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
-    )
+    train_env = TradingPlatform(train_asset_pool, HISTORICAL_DAYS_NUM)
     train_env.is_training = True
     train_env.figure_num = "train"
-    rep_train_env = TradingPlatform(
-        train_asset_pool, HISTORICAL_DAYS_NUM,
-        position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
-    )
+    rep_train_env = TradingPlatform(train_asset_pool, HISTORICAL_DAYS_NUM)
     rep_train_env.is_training = False
     rep_train_env.figure_num = "train"
     # Evaluation environments
@@ -50,10 +41,7 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
             (LAST_TRAINING_DATE if i == 0 else EVAL_DATE_RANGES[i - 1], last_eval_date), HISTORICAL_DAYS_NUM,
             excluding_historical=False,
         )
-        eval_env = TradingPlatform(
-            eval_asset_pool, HISTORICAL_DAYS_NUM,
-            position_holding_daily_fee=POSITION_HOLDING_DAILY_FEE, position_opening_penalty=POSITION_OPENING_PENALTY,
-        )
+        eval_env = TradingPlatform(eval_asset_pool, HISTORICAL_DAYS_NUM)
         eval_env.is_training = False
         eval_env.figure_num = "eval"  # All eval envs have the same `figure_num` to avoid creating too many figures
         eval_envs[f"{i + 1}eval"] = eval_env
@@ -61,7 +49,7 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
 
 
 def generate_stock_assets() -> List[Stock]:
-    MAX_DAYS_NUM = None  # YEARLY_TRADABLE_DAYS_NUM * 20
+    MAX_DAYS_NUM = None
     constituents_file_path = Path(__file__).parent.parent / "data" / "stock" / "input" / "sp500.csv"
     input_dir_path = Path(__file__).parent.parent / "data" / "stock" / "input" / "us"
     symbols = StockIndex(constituents_file_path, input_dir_path).symbols
