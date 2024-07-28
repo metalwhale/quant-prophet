@@ -215,19 +215,24 @@ class TradingPlatform(gym.Env):
             self._positions.append(Position(
                 self._prices[-1].date,
                 PositionType(action),
-                self._prices[-1].smoothed_price if self.smoothing_position_net else self._prices[-1].actual_price,
+                self._last_price,
                 self._POSITION_AMOUNT_UNIT if self.using_fixed_position_amount else self._prices[-1].actual_price,
             ))
         # Recalculate position's net by first reverting net of the current date.
         # The net of the next date will be calculated later.
-        reward -= self._positions[-1].amount * self._last_position_net_ratio
+        earning = -self._positions[-1].amount * self._last_position_net_ratio
         # Move to the next date
         self._date_index += 1
         self._retrieve_prices()
         # TODO: Consider if it is okay to include net of the next date in the reward
-        reward += self._positions[-1].amount * self._last_position_net_ratio  # Net of the next date
-        # Treat the earning as a cumulative reward in each episode
-        self._extra_info.earning += reward
+        earning += self._positions[-1].amount * self._last_position_net_ratio  # Net of the next date
+        self._extra_info.earning += earning
+        # Use only the earning of SELL positions for rewards because:
+        # - BUY positions are similar to holding, so performance depends mainly on SELL strategy.
+        # - The optimal position amount for calculating rewards is unclear, whether using a fixed unit or the actual price.
+        # Note that this doesn't mean it's not good to include the earning of BUY positions for reward.
+        if self._positions[-1].position_type == PositionType.SELL:
+            reward += earning
         # Read more about termination and truncation at:
         # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/handling_time_limits/
         # - https://farama.org/Gymnasium-Terminated-Truncated-Step-API
@@ -414,11 +419,12 @@ class TradingPlatform(gym.Env):
         return self._asset_pool.get_asset(self._asset_symbol)
 
     @property
+    def _last_price(self) -> float:
+        return self._prices[-1].smoothed_price if self.smoothing_position_net else self._prices[-1].actual_price
+
+    @property
     def _last_position_net_ratio(self) -> float:
-        return calc_position_net_ratio(
-            self._positions[-1],
-            self._prices[-1].smoothed_price if self.smoothing_position_net else self._prices[-1].actual_price,
-        )
+        return calc_position_net_ratio(self._positions[-1], self._last_price)
 
     # Should be called right after updating `self._date_index` to the newest date
     def _retrieve_prices(self):
@@ -460,7 +466,7 @@ def calc_earning(
     earning = 0
     position_net_ratios: List[float] = []
     price_change_ratios: List[float] = []
-    # Rewards (net, fee, penalty) of closed positions (excluding the last position, as it is probably not yet closed)
+    # Earning of closed positions (excluding the last position, as it is probably not yet closed)
     for prev_position, cur_position in zip(positions[:-1], positions[1:]):
         # Position net
         position_net_ratio = calc_position_net_ratio(prev_position, cur_position.entry_price)
@@ -468,7 +474,7 @@ def calc_earning(
         price_change_ratios.append(cur_position.entry_price / prev_position.entry_price - 1)
         earning += prev_position.amount * position_net_ratio
         logging.debug("%s %f %s", prev_position.date, prev_position.entry_price, prev_position.position_type)
-    # Reward of the last position
+    # Earning of the last position
     last_position_net_ratio = calc_position_net_ratio(
         positions[-1],
         final_price.smoothed_price if smoothing_position_net else final_price.actual_price,
