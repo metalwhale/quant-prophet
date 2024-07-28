@@ -214,19 +214,24 @@ class TradingPlatform(gym.Env):
             self._positions.append(Position(
                 self._prices[-1].date,
                 PositionType(action),
-                self._prices[-1].smoothed_price if self.smoothing_position_net else self._prices[-1].actual_price,
+                self._last_price,
                 self._POSITION_AMOUNT_UNIT if self.using_fixed_position_amount else self._prices[-1].actual_price,
             ))
         # Recalculate position's net by first reverting net of the current date.
         # The net of the next date will be calculated later.
-        reward -= self._positions[-1].amount * self._last_position_net_ratio
+        net = -self._positions[-1].amount * self._last_position_net_ratio
         # Move to the next date
         self._date_index += 1
         self._retrieve_prices()
         # TODO: Consider if it is okay to include net of the next date in the reward
-        reward += self._positions[-1].amount * self._last_position_net_ratio  # Net of the next date
+        net += self._positions[-1].amount * self._last_position_net_ratio  # Net of the next date
+        # Use only the net of SELL positions for rewards because:
+        # - BUY positions are similar to holding, so performance depends mainly on SELL strategy.
+        # - The optimal position amount for calculating rewards is unclear, whether using a fixed unit or the actual price.
+        if self._positions[-1].position_type == PositionType.SELL:
+            reward += net
         # Treat the earning as a cumulative reward in each episode
-        self._extra_info.earning += reward
+        self._extra_info.earning += net
         # Read more about termination and truncation at:
         # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/handling_time_limits/
         # - https://farama.org/Gymnasium-Terminated-Truncated-Step-API
@@ -413,11 +418,12 @@ class TradingPlatform(gym.Env):
         return self._asset_pool.get_asset(self._asset_symbol)
 
     @property
+    def _last_price(self) -> float:
+        return self._prices[-1].smoothed_price if self.smoothing_position_net else self._prices[-1].actual_price
+
+    @property
     def _last_position_net_ratio(self) -> float:
-        return calc_position_net_ratio(
-            self._positions[-1],
-            self._prices[-1].smoothed_price if self.smoothing_position_net else self._prices[-1].actual_price,
-        )
+        return calc_position_net_ratio(self._positions[-1], self._last_price)
 
     # Should be called right after updating `self._date_index` to the newest date
     def _retrieve_prices(self):
