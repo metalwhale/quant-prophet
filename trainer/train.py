@@ -32,6 +32,7 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
     train_env.figure_num = "train"
     rep_train_env = TradingPlatform(train_asset_pool, HISTORICAL_DAYS_NUM)
     rep_train_env.is_training = False
+    rep_train_env.using_fixed_position_amount = False
     rep_train_env.figure_num = "train"
     # Evaluation environments
     eval_envs: Dict[str, TradingPlatform] = {"0train": rep_train_env}  # Use train env for evaluation as well
@@ -43,6 +44,7 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
         )
         eval_env = TradingPlatform(eval_asset_pool, HISTORICAL_DAYS_NUM)
         eval_env.is_training = False
+        eval_env.using_fixed_position_amount = False
         eval_env.figure_num = "eval"  # All eval envs have the same `figure_num` to avoid creating too many figures
         eval_envs[f"{i + 1}eval"] = eval_env
     return train_env, eval_envs

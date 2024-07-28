@@ -78,17 +78,20 @@ class Position:
 class TradingPlatform(gym.Env):
     class ExtraInfo:
         action_values: Dict[datetime.date, Tuple[float, float, float]]
+        earning: float
 
         def __init__(self) -> None:
             self.action_values = {}
+            self.earning = 0
 
     metadata = {"render_modes": ["rgb_array"]}
 
     # Control flags
     is_training: bool
+    smoothing_position_net: bool
+    using_fixed_position_amount: bool
     favorite_symbols: Optional[List[str]]
     figure_num: str
-    smoothing_position_net: bool
 
     # Terminology
     # "Episode" and "step":
@@ -141,16 +144,12 @@ class TradingPlatform(gym.Env):
     _date_index: int  # Grows in the same episode, resets to 0 for a new episode
     _prices: List[DailyPrice]  # Updated whenever the date changes
     _positions: List[Position]  # Keeps adding positions in the same episode, clears them all for a new episode
-    _balance: float  # Resets to initial balance after each episode
 
     # Extra information
     _extra_info: ExtraInfo
 
     # Constants, mainly used only for training
-    # NOTE: In reality, initial balance should be higher than position amount to cover opening penalty.
-    # Here, all set to 1 for simplicity.
-    _POSITION_AMOUNT_UNIT: float = 100.0  # Equal to or less than the initial balance
-    _INITIAL_BALANCE_UNIT: float = 100.0
+    _POSITION_AMOUNT_UNIT: float = 100.0
     _ASSET_TYPE_WEIGHTS: Tuple[float, float] = [1.0, 0.0]  # (primary, secondary)
     _CLOSE_RANDOM_RADIUS: Optional[int] = 0
 
@@ -162,20 +161,16 @@ class TradingPlatform(gym.Env):
         super().__init__()
         # Control flags
         self.is_training = True
+        self.smoothing_position_net = False
+        self.using_fixed_position_amount = True
         self.favorite_symbols = None
         self.figure_num = ""
-        self.smoothing_position_net = False
         # Parameters
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
         # Environment
         # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
         self.action_space = gym.spaces.Discrete(len(PositionType) - 1)
-        # NOTE: Theoretically, we only need the historical price when deciding the position order (buy/sell or hold).
-        # However, with DQN (or perhaps many other RL algorithms),
-        # to inform the agent about how long the episode has elapsed and how long it takes to finish the episode,
-        # knowing "where" the current state is relatively located in an episode is critically required.
-        # In my best guess, this can be solved by adding information about current balance or the position we are holding.
         self.observation_space = gym.spaces.Dict({
             # Suppose that delta and diff values (ratios) are greater than -1 and less than 1,
             # meaning prices and other indicators never drop to 0 and never double from previous day.
@@ -208,7 +203,6 @@ class TradingPlatform(gym.Env):
         self._date_index = 0
         self._retrieve_prices()
         self._positions = []
-        self._balance = self._initial_balance
         observation = self._obtain_observation()
         info = {}
         self._extra_info = self.ExtraInfo()
@@ -222,7 +216,7 @@ class TradingPlatform(gym.Env):
                 self._prices[-1].date,
                 PositionType(action),
                 self._prices[-1].smoothed_price if self.smoothing_position_net else self._prices[-1].actual_price,
-                self._position_amount,
+                self._POSITION_AMOUNT_UNIT if self.using_fixed_position_amount else self._prices[-1].actual_price,
             ))
         # Recalculate position's net by first reverting net of the current date.
         # The net of the next date will be calculated later.
@@ -232,8 +226,8 @@ class TradingPlatform(gym.Env):
         self._retrieve_prices()
         # TODO: Consider if it is okay to include net of the next date in the reward
         reward += self._positions[-1].amount * self._last_position_net_ratio  # Net of the next date
-        # Treat the balance as a cumulative reward in each episode
-        self._balance += reward
+        # Treat the earning as a cumulative reward in each episode
+        self._extra_info.earning += reward
         # Read more about termination and truncation at:
         # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/handling_time_limits/
         # - https://farama.org/Gymnasium-Terminated-Truncated-Step-API
@@ -392,7 +386,7 @@ class TradingPlatform(gym.Env):
                 action = np.random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL])
             obs, _, terminated, truncated, info = self.step(action.value)
             is_end_of_date = info["is_end_of_date"]
-            logging.debug("%s %f %f", self._prices[-1].date, self._prices[-1].actual_price, self._balance)
+            logging.debug("%s %f %f", self._prices[-1].date, self._prices[-1].actual_price, self._extra_info.earning)
             if is_end_of_date or (stopping_when_done and (terminated or truncated)):
                 break
             step += 1
@@ -404,7 +398,7 @@ class TradingPlatform(gym.Env):
         )
         logging.debug("%s %f", self._prices[-1].date, self._prices[-1].actual_price)
         # Platform earning and self-calculated earning should be equal
-        platform_earning = self._balance - self._initial_balance
+        platform_earning = self._extra_info.earning
         return (
             rendered,
             (platform_earning, calculated_earning, price_change, wl_rate),
@@ -418,14 +412,6 @@ class TradingPlatform(gym.Env):
     @property
     def _asset(self) -> DailyAsset:
         return self._asset_pool.get_asset(self._asset_symbol)
-
-    @property
-    def _position_amount(self) -> float:
-        return self._POSITION_AMOUNT_UNIT
-
-    @property
-    def _initial_balance(self) -> float:
-        return self._INITIAL_BALANCE_UNIT
 
     @property
     def _last_position_net_ratio(self) -> float:
