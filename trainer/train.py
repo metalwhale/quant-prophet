@@ -29,6 +29,7 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
     train_asset_pool.apply_date_range((FIRST_TRAINING_DATE, LAST_TRAINING_DATE), HISTORICAL_DAYS_NUM)
     train_env = TradingPlatform(train_asset_pool, HISTORICAL_DAYS_NUM)
     train_env.is_training = True
+    train_env.smoothing_position_net = True
     train_env.figure_num = "train"
     rep_train_env = TradingPlatform(train_asset_pool, HISTORICAL_DAYS_NUM)
     rep_train_env.is_training = False
