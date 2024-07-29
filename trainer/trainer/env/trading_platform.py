@@ -176,9 +176,9 @@ class TradingPlatform(gym.Env):
             # meaning prices and other indicators never drop to 0 and never double from previous day.
             "historical_price_delta_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             "historical_ema_diff_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
-            "historical_rsis": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
-            "historical_adxs": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
-            "historical_ccis": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            "historical_scaled_rsis": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
+            "historical_scaled_adxs": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
+            "historical_scaled_ccis": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             # Position types have the same values as action space.
             "position_type": gym.spaces.Discrete(len(PositionType)),
         })
@@ -312,18 +312,18 @@ class TradingPlatform(gym.Env):
         all_axes.append(("EMA diff ratios", axes, {p.date: p.ema_diff_ratio for p in prices}))
         axes.plot(dates, [0 for _ in dates], color="gray")
         axes.plot(dates, [p.ema_diff_ratio if p.date in dates else None for p in prices], color="orange")
-        # Plot RSIs
+        # Plot scaled RSIs
         axes = figure.add_subplot(613)
-        all_axes.append(("RSIs", axes, {p.date: p.rsi for p in prices}))
-        axes.plot(dates, [p.rsi if p.date in dates else None for p in prices])
-        # Plot ADXs
+        all_axes.append(("RSIs", axes, {p.date: p.scaled_rsi for p in prices}))
+        axes.plot(dates, [p.scaled_rsi if p.date in dates else None for p in prices])
+        # Plot scaled ADXs
         axes = figure.add_subplot(614)
-        all_axes.append(("ADXs", axes, {p.date: p.adx for p in prices}))
-        axes.plot(dates, [p.adx if p.date in dates else None for p in prices])
-        # Plot CCIs
+        all_axes.append(("ADXs", axes, {p.date: p.scaled_adx for p in prices}))
+        axes.plot(dates, [p.scaled_adx if p.date in dates else None for p in prices])
+        # Plot scaled CCIs
         axes = figure.add_subplot(615)
-        all_axes.append(("CCIs", axes, {p.date: p.cci for p in prices}))
-        axes.plot(dates, [p.cci if p.date in dates else None for p in prices])
+        all_axes.append(("CCIs", axes, {p.date: p.scaled_cci for p in prices}))
+        axes.plot(dates, [p.scaled_cci if p.date in dates else None for p in prices])
         # Plot action values
         action_values = self._extra_info.action_values
         axes = figure.add_subplot(616)
@@ -441,9 +441,9 @@ class TradingPlatform(gym.Env):
         return {
             "historical_price_delta_ratios": np.array([p.price_delta_ratio for p in self._prices]),
             "historical_ema_diff_ratios": np.array([p.ema_diff_ratio for p in self._prices]),
-            "historical_rsis": np.array([p.rsi / 100 for p in self._prices]),  # RSI range between 0 and 100
-            "historical_adxs": np.array([p.adx / 100 for p in self._prices]),  # ADX range between 0 and 100
-            "historical_ccis": np.array([p.cci / 400 for p in self._prices]),  # TODO: Choose a better bound for CCI
+            "historical_scaled_rsis": np.array([p.scaled_rsi for p in self._prices]),
+            "historical_scaled_adxs": np.array([p.scaled_adx for p in self._prices]),
+            "historical_scaled_ccis": np.array([p.scaled_cci for p in self._prices]),
             "position_type": np.array([(
                 self._positions[-1].position_type if len(self._positions) > 0 else PositionType(
                     # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL

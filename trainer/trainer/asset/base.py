@@ -100,25 +100,25 @@ class DailyPrice:
     _smoothed_price: float
     _price_delta_ratio: float  # Change in price expressed as a ratio compared to the previous day
     _ema_diff_ratio: float  # Difference in ratio between fast EMA and slow EMA
-    _rsi: float
-    _adx: float
-    _cci: float
+    _scaled_rsi: float
+    _scaled_adx: float
+    _scaled_cci: float
 
     def __init__(
         self,
         date: datetime.date,
         actual_price: float, smoothed_price: float,
         price_delta_ratio: float, ema_diff_ratio: float,
-        rsi: float, adx: float, cci: float,
+        scaled_rsi: float, scaled_adx: float, scaled_cci: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
         self._smoothed_price = smoothed_price
         self._price_delta_ratio = price_delta_ratio
         self._ema_diff_ratio = ema_diff_ratio
-        self._rsi = rsi
-        self._adx = adx
-        self._cci = cci
+        self._scaled_rsi = scaled_rsi
+        self._scaled_adx = scaled_adx
+        self._scaled_cci = scaled_cci
 
     @property
     def date(self) -> datetime.date:
@@ -141,16 +141,16 @@ class DailyPrice:
         return self._ema_diff_ratio
 
     @property
-    def rsi(self) -> float:
-        return self._rsi
+    def scaled_rsi(self) -> float:
+        return self._scaled_rsi
 
     @property
-    def adx(self) -> float:
-        return self._adx
+    def scaled_adx(self) -> float:
+        return self._scaled_adx
 
     @property
-    def cci(self) -> float:
-        return self._cci
+    def scaled_cci(self) -> float:
+        return self._scaled_cci
 
 
 class DailyAsset(ABC):
@@ -279,9 +279,9 @@ class DailyAsset(ABC):
                 ]) / (2 * self.__SMOOTHED_RADIUS + 1),
                 self.__indicators[i].actual_price / self.__indicators[i - self.__DELTA_DISTANCE].actual_price - 1,
                 self.__indicators[i].fast_ema / self.__indicators[i].slow_ema - 1,
-                self.__indicators[i].rsi,
-                self.__indicators[i].adx,
-                self.__indicators[i].cci,
+                self.__indicators[i].rsi / 100,  # RSI range between 0 and 100
+                self.__indicators[i].adx / 100,  # ADX range between 0 and 100
+                self.__indicators[i].cci / 400,  # TODO: Choose a better bound for CCI
             ))
         return prices
 
