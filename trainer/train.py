@@ -34,7 +34,7 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
     rep_train_env.set_mode(False)
     rep_train_env.figure_num = "train"
     # Evaluation environments
-    eval_envs: Dict[str, TradingPlatform] = {"0train": rep_train_env}  # Use train env for evaluation as well
+    eval_envs: Dict[str, TradingPlatform] = {}  # Use train env for evaluation as well
     for i, last_eval_date in enumerate(EVAL_DATE_RANGES):
         eval_asset_pool = AssetPool(assets)
         eval_asset_pool.apply_date_range(
@@ -91,10 +91,10 @@ def train(env_type: str):
         total_timesteps=20000000,
         callback=FullEvalCallback(
             Path(__file__).parent.parent / "data" / env_type / "output" / now,
-            eval_envs, 100,
-            action_diff_threshold=1.0, showing_image=False,
+            eval_envs, 500,
+            action_diff_threshold=0.0, showing_image=False,
         ),
-        log_interval=100,
+        log_interval=500,
     )
 
 

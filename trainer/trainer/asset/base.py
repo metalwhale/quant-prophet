@@ -269,9 +269,7 @@ class DailyAsset(ABC):
             simplified_closes,
             EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_FAST).ema_indicator(),
             EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_SLOW).ema_indicator(),
-            RSIIndicator(simplified_closes, window=self.__RSI_WINDOW).rsi(),
-            ADXIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__ADX_WINDOW).adx(),
-            CCIIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__CCI_WINDOW).cci(),
+            simplified_closes, simplified_closes, simplified_closes,
             strict=True,
         ):
             self.__indicators.append(DailyIndicator(
