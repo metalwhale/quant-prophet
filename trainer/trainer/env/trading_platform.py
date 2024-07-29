@@ -151,7 +151,7 @@ class TradingPlatform(gym.Env):
     _POSITION_AMOUNT_UNIT: float = 100.0
     _ASSET_TYPE_WEIGHTS: Tuple[float, float] = [1.0, 0.0]  # (primary, secondary)
     _CLOSE_RANDOM_RADIUS: Optional[int] = 0
-    _MIN_PRICE_CHANGE_RATIO_MAGNITUDE: Optional[float] = 0.1  # TODO: Choose a better value
+    _MIN_PRICE_CHANGE_RATIO_MAGNITUDE: Optional[float] = 0.08  # TODO: Choose a better value
 
     def __init__(
         self,
@@ -175,9 +175,9 @@ class TradingPlatform(gym.Env):
             # Suppose that delta and diff values (ratios) are greater than -1 and less than 1,
             # meaning prices and other indicators never drop to 0 and never double from previous day.
             "historical_ema_diff_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
-            "historical_scaled_rsis": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
-            "historical_scaled_adxs": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
-            "historical_scaled_ccis": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            # "historical_scaled_rsis": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
+            # "historical_scaled_adxs": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
+            # "historical_scaled_ccis": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             # Position types have the same values as action space.
             "position_type": gym.spaces.Discrete(len(PositionType)),
         })
@@ -250,7 +250,7 @@ class TradingPlatform(gym.Env):
     def render(self) -> Any | List[Any] | None:
         YEAR_WIDTH = 2
         SUBPLOT_HEIGHT = 3
-        FEATURES = ["ema_diff_ratio", "scaled_rsi", "scaled_adx", "scaled_cci"]
+        FEATURES = ["ema_diff_ratio"]
         TOP_MARGIN = 350
         BOTTOM_MARGIN = 150
         features_num = len(FEATURES) + 2
@@ -448,9 +448,9 @@ class TradingPlatform(gym.Env):
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_ema_diff_ratios": np.array([p.ema_diff_ratio for p in self._prices]),
-            "historical_scaled_rsis": np.array([p.scaled_rsi for p in self._prices]),
-            "historical_scaled_adxs": np.array([p.scaled_adx for p in self._prices]),
-            "historical_scaled_ccis": np.array([p.scaled_cci for p in self._prices]),
+            # "historical_scaled_rsis": np.array([p.scaled_rsi for p in self._prices]),
+            # "historical_scaled_adxs": np.array([p.scaled_adx for p in self._prices]),
+            # "historical_scaled_ccis": np.array([p.scaled_cci for p in self._prices]),
             "position_type": np.array([(
                 self._positions[-1].position_type if len(self._positions) > 0 else PositionType(
                     # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL

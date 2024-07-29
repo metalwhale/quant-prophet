@@ -236,9 +236,9 @@ class DailyAsset(ABC):
         # Calculate indicators
         fast_emas = EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_FAST).ema_indicator()
         slow_emas = EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_SLOW).ema_indicator()
-        rsis = RSIIndicator(simplified_closes, window=self.__RSI_WINDOW).rsi()
-        adxs = ADXIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__ADX_WINDOW).adx()
-        ccis = CCIIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__CCI_WINDOW).cci()
+        rsis = simplified_closes
+        adxs = simplified_closes
+        ccis = simplified_closes
         # Historical prices for the days before `end_date`
         prices: List[DailyPrice] = []
         start_date_index = end_date_index - (days_num - 1)

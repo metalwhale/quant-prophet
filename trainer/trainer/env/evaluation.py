@@ -44,7 +44,7 @@ class FullEvalCallback(BaseCallback):
         self._ep_count = 0
 
     def _on_training_start(self) -> None:
-        self.__eval_model()
+        # self.__eval_model()
         return super()._on_training_start()
 
     def _on_step(self) -> bool:
