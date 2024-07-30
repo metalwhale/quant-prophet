@@ -44,8 +44,7 @@ class DailyCandle:
 class DailyIndicator:
     _date: datetime.date
     _actual_price: float
-    _fast_ema: float
-    _slow_ema: float
+    _emas: Tuple[float, float]
     _rsi: float
     _adx: float
     _cci: float
@@ -54,13 +53,12 @@ class DailyIndicator:
         self,
         date: datetime.date,
         actual_price: float,
-        fast_ema: float, slow_ema: float,
+        emas: Tuple[float, float],
         rsi: float, adx: float, cci: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
-        self._fast_ema = fast_ema
-        self._slow_ema = slow_ema
+        self._emas = emas
         self._rsi = rsi
         self._adx = adx
         self._cci = cci
@@ -74,12 +72,8 @@ class DailyIndicator:
         return self._actual_price
 
     @property
-    def fast_ema(self) -> float:
-        return self._fast_ema
-
-    @property
-    def slow_ema(self) -> float:
-        return self._slow_ema
+    def emas(self) -> Tuple[float, float]:
+        return self._emas
 
     @property
     def rsi(self) -> float:
@@ -161,13 +155,14 @@ class DailyAsset(ABC):
 
     # NOTE: When adding a new hyperparameter to calculate historical and prospective data,
     # remember to modify `calc_buffer_days_num` method
-    __SMOOTHED_RADIUS = 2  # TODO: Choose a better number of radius for calculating smoothed prices
+    # TODO: Choose better values
+    __SMOOTHED_RADIUS = 2
     __DELTA_DISTANCE = 1
-    __FAST_EMA_WINDOW = 5  # TODO: Choose a better window
-    __SLOW_EMA_WINDOW = 20  # TODO: Choose a better window (longer than fast EMA)
-    __RSI_WINDOW = 14  # TODO: Choose a better window
-    __ADX_WINDOW = 14  # TODO: Choose a better window
-    __CCI_WINDOW = 20  # TODO: Choose a better window
+    __EMA_WINDOW_FAST = 5
+    __EMA_WINDOW_SLOW = 20
+    __RSI_WINDOW = 14
+    __ADX_WINDOW = 14
+    __CCI_WINDOW = 20
 
     __DATE_FORMAT = "%Y-%m-%d"
 
@@ -242,14 +237,14 @@ class DailyAsset(ABC):
         for (candle, close, fast_ema, slow_ema, rsi, adx, cci) in zip(
             self.__candles,
             closes,
-            EMAIndicator(closes, window=self.__FAST_EMA_WINDOW).ema_indicator(),
-            EMAIndicator(closes, window=self.__SLOW_EMA_WINDOW).ema_indicator(),
+            EMAIndicator(closes, window=self.__EMA_WINDOW_FAST).ema_indicator(),
+            EMAIndicator(closes, window=self.__EMA_WINDOW_SLOW).ema_indicator(),
             RSIIndicator(closes, window=self.__RSI_WINDOW).rsi(),
             ADXIndicator(highs, lows, closes, window=self.__ADX_WINDOW).adx(),
             CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci(),
             strict=True,
         ):
-            self.__indicators.append(DailyIndicator(candle.date, close, fast_ema, slow_ema, rsi, adx, cci))
+            self.__indicators.append(DailyIndicator(candle.date, close, (fast_ema, slow_ema), rsi, adx, cci))
 
     # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
     # The actual price used is usually the close price, except for end date,
@@ -278,7 +273,7 @@ class DailyAsset(ABC):
                     for ind in self.__indicators[i - self.__SMOOTHED_RADIUS:i + self.__SMOOTHED_RADIUS + 1]
                 ]) / (2 * self.__SMOOTHED_RADIUS + 1),
                 self.__indicators[i].actual_price / self.__indicators[i - self.__DELTA_DISTANCE].actual_price - 1,
-                self.__indicators[i].fast_ema / self.__indicators[i].slow_ema - 1,
+                self.__indicators[i].emas[0] / self.__indicators[i].emas[1] - 1,
                 self.__indicators[i].rsi / 100,  # RSI range between 0 and 100
                 self.__indicators[i].adx / 100,  # ADX range between 0 and 100
                 self.__indicators[i].cci / 400,  # TODO: Choose a better bound for CCI
@@ -291,7 +286,7 @@ class DailyAsset(ABC):
         historical_buffer_days_num = max(
             cls.__SMOOTHED_RADIUS,  # For smoothed prices
             cls.__DELTA_DISTANCE,  # For price delta ratios
-            max(cls.__FAST_EMA_WINDOW - 1, cls.__SLOW_EMA_WINDOW - 1),  # For EMA diff ratios' first `nan`s
+            max(cls.__EMA_WINDOW_FAST - 1, cls.__EMA_WINDOW_SLOW - 1),  # For EMA diff ratios' first `nan`s
             cls.__RSI_WINDOW - 1,  # For RSI's first `nan`s
             cls.__ADX_WINDOW * 2 - 1,  # For ADX's first `0`s
             cls.__CCI_WINDOW - 1,  # For CCI's first `nan`s
