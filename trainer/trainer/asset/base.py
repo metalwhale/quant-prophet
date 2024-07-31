@@ -1,5 +1,7 @@
 import datetime
 from abc import ABC, abstractmethod
+from collections import OrderedDict
+from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -44,6 +46,7 @@ class DailyCandle:
 class DailyIndicator:
     _date: datetime.date
     _actual_price: float
+    _simplified_price: float
     _emas: Tuple[float, float]
     _rsi: float
     _adx: float
@@ -52,12 +55,13 @@ class DailyIndicator:
     def __init__(
         self,
         date: datetime.date,
-        actual_price: float,
+        actual_price: float, simplified_price: float,
         emas: Tuple[float, float],
         rsi: float, adx: float, cci: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
+        self._simplified_price = simplified_price
         self._emas = emas
         self._rsi = rsi
         self._adx = adx
@@ -70,6 +74,10 @@ class DailyIndicator:
     @property
     def actual_price(self) -> float:
         return self._actual_price
+
+    @property
+    def simplified_price(self) -> float:
+        return self._simplified_price
 
     @property
     def emas(self) -> Tuple[float, float]:
@@ -88,9 +96,16 @@ class DailyIndicator:
         return self._cci
 
 
+class PriceType(Enum):
+    ACTUAL = 0
+    SIMPLIFIED = 1
+    SMOOTHED = 2
+
+
 class DailyPrice:
     _date: datetime.date
     _actual_price: float
+    _simplified_price: float
     _smoothed_price: float
     _price_delta_ratio: float  # Change in price expressed as a ratio compared to the previous day
     _ema_diff_ratio: float  # Difference in ratio between fast EMA and slow EMA
@@ -101,18 +116,29 @@ class DailyPrice:
     def __init__(
         self,
         date: datetime.date,
-        actual_price: float, smoothed_price: float,
+        actual_price: float, simplified_price: float, smoothed_price: float,
         price_delta_ratio: float, ema_diff_ratio: float,
         scaled_rsi: float, scaled_adx: float, scaled_cci: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
+        self._simplified_price = simplified_price
         self._smoothed_price = smoothed_price
         self._price_delta_ratio = price_delta_ratio
         self._ema_diff_ratio = ema_diff_ratio
         self._scaled_rsi = scaled_rsi
         self._scaled_adx = scaled_adx
         self._scaled_cci = scaled_cci
+
+    def get_price(self, price_type: PriceType) -> float:
+        if price_type == PriceType.ACTUAL:
+            return self.actual_price
+        elif price_type == PriceType.SIMPLIFIED:
+            return self.simplified_price
+        elif price_type == PriceType.SMOOTHED:
+            return self.smoothed_price
+        else:
+            raise NotImplementedError
 
     @property
     def date(self) -> datetime.date:
@@ -121,6 +147,10 @@ class DailyPrice:
     @property
     def actual_price(self) -> float:
         return self._actual_price
+
+    @property
+    def simplified_price(self) -> float:
+        return self._simplified_price
 
     @property
     def smoothed_price(self) -> float:
@@ -208,11 +238,15 @@ class DailyAsset(ABC):
             date_range.append(date)
         return date_range
 
-    def prepare_indicators(self, close_random_radius: Optional[int] = None):
+    def prepare_indicators(
+        self,
+        close_random_radius: Optional[int] = None,
+        min_price_change_ratio_magnitude: float = 0.0,
+    ):
         self.__indicators = []
-        highs: List[float] = []
-        lows: List[float] = []
-        closes: List[float] = []
+        highs = []
+        lows = []
+        closes = []
         for i, candle in enumerate(self.__candles):
             low = candle.low
             high = candle.high
@@ -234,9 +268,10 @@ class DailyAsset(ABC):
         highs = pd.Series(highs)
         lows = pd.Series(lows)
         closes = pd.Series(closes)
-        for (candle, close, fast_ema, slow_ema, rsi, adx, cci) in zip(
+        for (candle, close, simplified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
             self.__candles,
             closes,
+            simplify(closes.to_list(), min_price_change_ratio_magnitude=min_price_change_ratio_magnitude),
             EMAIndicator(closes, window=self.__EMA_WINDOW_FAST).ema_indicator(),
             EMAIndicator(closes, window=self.__EMA_WINDOW_SLOW).ema_indicator(),
             RSIIndicator(closes, window=self.__RSI_WINDOW).rsi(),
@@ -244,7 +279,12 @@ class DailyAsset(ABC):
             CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci(),
             strict=True,
         ):
-            self.__indicators.append(DailyIndicator(candle.date, close, (fast_ema, slow_ema), rsi, adx, cci))
+            self.__indicators.append(DailyIndicator(
+                candle.date,
+                close, simplified_close,
+                (fast_ema, slow_ema),
+                rsi, adx, cci,
+            ))
 
     # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
     # The actual price used is usually the close price, except for end date,
@@ -268,6 +308,7 @@ class DailyAsset(ABC):
             prices.append(DailyPrice(
                 self.__indicators[i].date,
                 self.__indicators[i].actual_price,
+                self.__indicators[i].simplified_price,
                 sum([
                     ind.actual_price
                     for ind in self.__indicators[i - self.__SMOOTHED_RADIUS:i + self.__SMOOTHED_RADIUS + 1]
@@ -318,3 +359,86 @@ class DailyAsset(ABC):
 
     def __get_date_index(self, date: datetime.date) -> Optional[int]:
         return self.__date_indices.get(date.strftime(self.__DATE_FORMAT))
+
+
+class LevelType(Enum):
+    SUPPORT = 0
+    RESISTANCE = 1
+
+
+def simplify(prices: List[float], min_price_change_ratio_magnitude: float = 0.0) -> List[float]:
+    if min_price_change_ratio_magnitude < 0:
+        # Should be positive
+        raise ValueError
+    # Detect levels
+    level_types: OrderedDict[int, LevelType] = OrderedDict()
+    index = 0
+    level_types[index] = LevelType.RESISTANCE  # An arbitrary initial level, which can be set to any level type
+    while index < len(prices) - 1:
+        index += 1
+        last1_level_index = list(level_types.keys())[-1]
+        last2_level_index = list(level_types.keys())[-2] if len(level_types) >= 2 else None
+        if level_types[last1_level_index] == LevelType.SUPPORT:
+            # Case 1: Add a new resistance level if its price is higher than the last support level by a specified ratio
+            if prices[index] / prices[last1_level_index] >= 1 + min_price_change_ratio_magnitude:
+                level_types[index] = LevelType.RESISTANCE
+            # Case 2: Update the last support level if the new price is lower
+            elif prices[index] <= prices[last1_level_index]:
+                level_types.pop(last1_level_index)
+                # Find the highest price before the current price:
+                # - If there is no second-last level (only the last level), we start searching from the beginning
+                # - We use `[::-1]` to reverse the array so that `argmax` can find the last index of the highest price
+                #   in case there are multiple occurrences of the highest price with the same value
+                start_index = last1_level_index if last2_level_index is not None else 0
+                highest_index = (index - 1) - np.argmax(prices[start_index:index][::-1])
+                if last2_level_index is not None:
+                    # Update the second-last resistance level to the new highest price
+                    if prices[highest_index] >= prices[last2_level_index]:
+                        level_types.pop(last2_level_index)
+                        level_types[highest_index] = LevelType.RESISTANCE
+                else:
+                    # Add the highest price as a second-last resistance level, preceding the last support level
+                    if prices[index] / prices[highest_index] <= 1 - min_price_change_ratio_magnitude:
+                        level_types[highest_index] = LevelType.RESISTANCE
+                # Update the last support level
+                level_types[index] = LevelType.SUPPORT
+        elif level_types[last1_level_index] == LevelType.RESISTANCE:
+            # Case 1: Add a new support level if its price is lower than the last resistance level by a specified ratio
+            if prices[index] / prices[last1_level_index] <= 1 - min_price_change_ratio_magnitude:
+                level_types[index] = LevelType.SUPPORT
+            # Case 2: Update the last resistance level if the new price is higher
+            elif prices[index] >= prices[last1_level_index]:
+                level_types.pop(last1_level_index)
+                # Find the lowest price before the current price:
+                # - If there is no second-last level (only the last level), we start searching from the beginning
+                # - We use `[::-1]` to reverse the array so that `argmin` can find the last index of the lowest price
+                #   in case there are multiple occurrences of the lowest price with the same value
+                start_index = last1_level_index if last2_level_index is not None else 0
+                lowest_index = (index - 1) - np.argmin(prices[start_index:index][::-1])
+                if last2_level_index is not None:
+                    # Update the second-last support level to the new lowest price
+                    if prices[lowest_index] <= prices[last2_level_index]:
+                        level_types.pop(last2_level_index)
+                        level_types[lowest_index] = LevelType.SUPPORT
+                else:
+                    # Add the lowest price as a second-last support level, preceding the last resistance level
+                    if prices[index] / prices[lowest_index] >= 1 + min_price_change_ratio_magnitude:
+                        level_types[lowest_index] = LevelType.SUPPORT
+                # Update the last resistance level
+                level_types[index] = LevelType.RESISTANCE
+    if len(level_types) == 1:
+        # If no levels are detected other than the initial one, clear the list of levels
+        level_types = OrderedDict()
+    # Simplify the prices using the detected level indices
+    level_indices = list(level_types.keys())
+    if len(level_indices) == 0 or level_indices[0] != 0:
+        level_indices.insert(0, 0)
+    if len(level_indices) == 0 or level_indices[-1] != len(prices) - 1:
+        level_indices.append(len(prices) - 1)
+    simplified_prices: List[float] = []
+    for index, next_index in zip(level_indices[:len(level_indices) - 1], level_indices[1:]):
+        for i in range(index, next_index):
+            simplified_price = prices[index] + (prices[next_index] - prices[index]) * (i - index) / (next_index - index)
+            simplified_prices.append(simplified_price)
+    simplified_prices.append(prices[-1])
+    return simplified_prices

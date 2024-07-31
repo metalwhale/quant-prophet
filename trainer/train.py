@@ -6,7 +6,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 from stable_baselines3 import DQN
 
-from trainer.asset.base import DailyAsset
+from trainer.asset.base import DailyAsset, PriceType
 from trainer.asset.stock import Stock, StockIndex
 from trainer.asset.zigzag import Zigzag
 from trainer.env.asset_pool import AssetPool
@@ -29,7 +29,7 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
     train_asset_pool.apply_date_range((FIRST_TRAINING_DATE, LAST_TRAINING_DATE), HISTORICAL_DAYS_NUM)
     train_env = TradingPlatform(train_asset_pool, HISTORICAL_DAYS_NUM)
     train_env.is_training = True
-    train_env.smoothing_position_net = True
+    train_env.position_net_price_type = PriceType.SIMPLIFIED
     train_env.figure_num = "train"
     rep_train_env = TradingPlatform(train_asset_pool, HISTORICAL_DAYS_NUM)
     rep_train_env.is_training = False

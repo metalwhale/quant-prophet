@@ -11,7 +11,7 @@ from matplotlib.axes import Axes
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3 import DQN
 
-from ..asset.base import DailyAsset, DailyPrice
+from ..asset.base import DailyAsset, DailyPrice, PriceType
 from .asset_pool import AssetPool
 
 
@@ -88,7 +88,7 @@ class TradingPlatform(gym.Env):
 
     # Control flags
     is_training: bool
-    smoothing_position_net: bool
+    position_net_price_type: PriceType
     using_fixed_position_amount: bool
     favorite_symbols: Optional[List[str]]
     figure_num: str
@@ -152,6 +152,7 @@ class TradingPlatform(gym.Env):
     _POSITION_AMOUNT_UNIT: float = 100.0
     _ASSET_TYPE_WEIGHTS: Tuple[float, float] = [1.0, 0.0]  # (primary, secondary)
     _CLOSE_RANDOM_RADIUS: Optional[int] = 0
+    _MIN_PRICE_CHANGE_RATIO_MAGNITUDE: float = 0.1  # TODO: Choose a better value
 
     def __init__(
         self,
@@ -161,7 +162,7 @@ class TradingPlatform(gym.Env):
         super().__init__()
         # Control flags
         self.is_training = True
-        self.smoothing_position_net = False
+        self.position_net_price_type = PriceType.ACTUAL
         self.using_fixed_position_amount = True
         self.favorite_symbols = None
         self.figure_num = ""
@@ -199,7 +200,10 @@ class TradingPlatform(gym.Env):
             randomizing_start=self.is_training,
             preferring_secondary=preferring_secondary,
         )
-        self._asset.prepare_indicators(close_random_radius=self._CLOSE_RANDOM_RADIUS if self.is_training else None)
+        self._asset.prepare_indicators(
+            close_random_radius=self._CLOSE_RANDOM_RADIUS if self.is_training else None,
+            min_price_change_ratio_magnitude=self._MIN_PRICE_CHANGE_RATIO_MAGNITUDE,
+        )
         self._date_index = 0
         self._retrieve_prices()
         self._positions = []
@@ -261,6 +265,8 @@ class TradingPlatform(gym.Env):
             # Retrieve all the days before the current date in the date range
             self._date_index + self._historical_days_num,
         )
+        # TODO: Adjust the x-axis to represent dates linearly, rather than based on datetime values,
+        # to ensure that the distance between consecutive data points remains consistent.
         dates = [p.date for p in prices]
         plt.rcParams.update({"font.size": 8})
         figure = plt.figure(
@@ -309,7 +315,7 @@ class TradingPlatform(gym.Env):
                 # Move to next position
                 position_index = next_position_index
                 date_prices = [date_price]
-        axes.plot(dates, [p.smoothed_price if p.date in dates else None for p in prices], alpha=0.5)
+        axes.plot(dates, [p.simplified_price if p.date in dates else None for p in prices], alpha=0.5)
         # Plot features
         for i, feature in enumerate(FEATURES):
             is_ratio = "ratio" in feature
@@ -396,7 +402,7 @@ class TradingPlatform(gym.Env):
         # Calculate the earning
         calculated_earning, price_change, wl_rate = calc_earning(
             self._positions, self._prices[-1],
-            smoothing_position_net=self.smoothing_position_net,
+            self.position_net_price_type,
         )
         logging.debug("%s %f", self._prices[-1].date, self._prices[-1].actual_price)
         # Platform earning and self-calculated earning should be equal
@@ -417,7 +423,7 @@ class TradingPlatform(gym.Env):
 
     @property
     def _last_price(self) -> float:
-        return self._prices[-1].smoothed_price if self.smoothing_position_net else self._prices[-1].actual_price
+        return self._prices[-1].get_price(self.position_net_price_type)
 
     @property
     def _last_position_net_ratio(self) -> float:
@@ -456,7 +462,7 @@ def calc_position_net_ratio(position: Position, price: float) -> float:
 
 def calc_earning(
     positions: List[Position], final_price: DailyPrice,
-    smoothing_position_net: bool = False,
+    position_net_price_type: PriceType,
 ) -> Tuple[float, float, float]:
     if len(positions) < 1 or positions[-1].date > final_price.date:
         return (0, 0, 0)
@@ -472,10 +478,7 @@ def calc_earning(
         earning += prev_position.amount * position_net_ratio
         logging.debug("%s %f %s", prev_position.date, prev_position.entry_price, prev_position.position_type)
     # Earning of the last position
-    last_position_net_ratio = calc_position_net_ratio(
-        positions[-1],
-        final_price.smoothed_price if smoothing_position_net else final_price.actual_price,
-    )
+    last_position_net_ratio = calc_position_net_ratio(positions[-1], final_price.get_price(position_net_price_type))
     position_net_ratios.append(last_position_net_ratio)
     price_change_ratios.append(final_price.actual_price / positions[-1].entry_price - 1)
     earning += positions[-1].amount * last_position_net_ratio
