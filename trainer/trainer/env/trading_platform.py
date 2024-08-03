@@ -152,7 +152,7 @@ class TradingPlatform(gym.Env):
     _POSITION_AMOUNT_UNIT: float = 100.0
     _ASSET_TYPE_WEIGHTS: Tuple[float, float] = [1.0, 0.0]  # (primary, secondary)
     _CLOSE_RANDOM_RADIUS: Optional[int] = 0
-    _MIN_PRICE_CHANGE_RATIO_MAGNITUDE: float = 0.1  # TODO: Choose a better value
+    _MIN_PRICE_CHANGE_RATIO_MAGNITUDE: Optional[float] = 0.1  # TODO: Choose a better value
 
     def __init__(
         self,

@@ -228,7 +228,7 @@ class DailyAsset(ABC):
     def prepare_indicators(
         self,
         close_random_radius: Optional[int] = None,
-        min_price_change_ratio_magnitude: float = 0.0,
+        min_price_change_ratio_magnitude: Optional[float] = None,
     ):
         self.__indicators = []
         highs = []
@@ -252,23 +252,32 @@ class DailyAsset(ABC):
             highs.append(high)
             lows.append(low)
             closes.append(close)
-        highs = pd.Series(highs)
-        lows = pd.Series(lows)
-        closes = pd.Series(closes)
-        for (candle, close, simplified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
+        # Simplify the prices
+        simplified_highs = highs
+        simplified_lows = lows
+        simplified_closes = closes
+        if min_price_change_ratio_magnitude is not None:
+            simplified_highs = simplify(highs, min_price_change_ratio_magnitude)
+            simplified_lows = simplify(lows, min_price_change_ratio_magnitude)
+            simplified_closes = simplify(closes, min_price_change_ratio_magnitude)
+        simplified_highs = pd.Series(simplified_highs)
+        simplified_lows = pd.Series(simplified_lows)
+        simplified_closes = pd.Series(simplified_closes)
+        # Calculate features
+        for (candle, actual_close, simplified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
             self.__candles,
-            closes,
-            simplify(closes.to_list(), min_price_change_ratio_magnitude=min_price_change_ratio_magnitude),
-            EMAIndicator(closes, window=self.__EMA_WINDOW_FAST).ema_indicator(),
-            EMAIndicator(closes, window=self.__EMA_WINDOW_SLOW).ema_indicator(),
-            RSIIndicator(closes, window=self.__RSI_WINDOW).rsi(),
-            ADXIndicator(highs, lows, closes, window=self.__ADX_WINDOW).adx(),
-            CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci(),
+            pd.Series(closes),
+            simplified_closes,
+            EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_FAST).ema_indicator(),
+            EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_SLOW).ema_indicator(),
+            RSIIndicator(simplified_closes, window=self.__RSI_WINDOW).rsi(),
+            ADXIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__ADX_WINDOW).adx(),
+            CCIIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__CCI_WINDOW).cci(),
             strict=True,
         ):
             self.__indicators.append(DailyIndicator(
                 candle.date,
-                close, simplified_close,
+                actual_close, simplified_close,
                 (fast_ema, slow_ema),
                 rsi, adx, cci,
             ))
@@ -294,7 +303,11 @@ class DailyAsset(ABC):
                 self.__indicators[i].date,
                 self.__indicators[i].actual_price,
                 self.__indicators[i].simplified_price,
-                self.__indicators[i].actual_price / self.__indicators[i - self.__DELTA_DISTANCE].actual_price - 1,
+                # Features
+                (
+                    self.__indicators[i].simplified_price /
+                    self.__indicators[i - self.__DELTA_DISTANCE].simplified_price - 1
+                ),
                 self.__indicators[i].emas[0] / self.__indicators[i].emas[1] - 1,
                 self.__indicators[i].rsi / 100,  # RSI range between 0 and 100
                 self.__indicators[i].adx / 100,  # ADX range between 0 and 100
@@ -345,25 +358,25 @@ class LevelType(Enum):
     RESISTANCE = 1
 
 
-def simplify(prices: List[float], min_price_change_ratio_magnitude: float = 0.0) -> List[float]:
+def simplify(prices: List[float], min_price_change_ratio_magnitude: float) -> List[float]:
     if min_price_change_ratio_magnitude < 0:
         # Should be positive
         raise ValueError
     # Detect levels
-    level_types: OrderedDict[int, LevelType] = OrderedDict()
+    levels: OrderedDict[int, LevelType] = OrderedDict()
     index = 0
-    level_types[index] = LevelType.RESISTANCE  # An arbitrary initial level, which can be set to any level type
+    levels[index] = LevelType.RESISTANCE  # An arbitrary initial level, which can be set to any level type
     while index < len(prices) - 1:
         index += 1
-        last1_level_index = list(level_types.keys())[-1]
-        last2_level_index = list(level_types.keys())[-2] if len(level_types) >= 2 else None
-        if level_types[last1_level_index] == LevelType.SUPPORT:
+        last1_level_index = list(levels.keys())[-1]
+        last2_level_index = list(levels.keys())[-2] if len(levels) >= 2 else None
+        if levels[last1_level_index] == LevelType.SUPPORT:
             # Case 1: Add a new resistance level if its price is higher than the last support level by a specified ratio
             if prices[index] / prices[last1_level_index] >= 1 + min_price_change_ratio_magnitude:
-                level_types[index] = LevelType.RESISTANCE
+                levels[index] = LevelType.RESISTANCE
             # Case 2: Update the last support level if the new price is lower
             elif prices[index] <= prices[last1_level_index]:
-                level_types.pop(last1_level_index)
+                levels.pop(last1_level_index)
                 # Find the highest price before the current price:
                 # - If there is no second-last level (only the last level), we start searching from the beginning
                 # - We use `[::-1]` to reverse the array so that `argmax` can find the last index of the highest price
@@ -373,21 +386,21 @@ def simplify(prices: List[float], min_price_change_ratio_magnitude: float = 0.0)
                 if last2_level_index is not None:
                     # Update the second-last resistance level to the new highest price
                     if prices[highest_index] >= prices[last2_level_index]:
-                        level_types.pop(last2_level_index)
-                        level_types[highest_index] = LevelType.RESISTANCE
+                        levels.pop(last2_level_index)
+                        levels[highest_index] = LevelType.RESISTANCE
                 else:
                     # Add the highest price as a second-last resistance level, preceding the last support level
                     if prices[index] / prices[highest_index] <= 1 - min_price_change_ratio_magnitude:
-                        level_types[highest_index] = LevelType.RESISTANCE
+                        levels[highest_index] = LevelType.RESISTANCE
                 # Update the last support level
-                level_types[index] = LevelType.SUPPORT
-        elif level_types[last1_level_index] == LevelType.RESISTANCE:
+                levels[index] = LevelType.SUPPORT
+        elif levels[last1_level_index] == LevelType.RESISTANCE:
             # Case 1: Add a new support level if its price is lower than the last resistance level by a specified ratio
             if prices[index] / prices[last1_level_index] <= 1 - min_price_change_ratio_magnitude:
-                level_types[index] = LevelType.SUPPORT
+                levels[index] = LevelType.SUPPORT
             # Case 2: Update the last resistance level if the new price is higher
             elif prices[index] >= prices[last1_level_index]:
-                level_types.pop(last1_level_index)
+                levels.pop(last1_level_index)
                 # Find the lowest price before the current price:
                 # - If there is no second-last level (only the last level), we start searching from the beginning
                 # - We use `[::-1]` to reverse the array so that `argmin` can find the last index of the lowest price
@@ -397,19 +410,19 @@ def simplify(prices: List[float], min_price_change_ratio_magnitude: float = 0.0)
                 if last2_level_index is not None:
                     # Update the second-last support level to the new lowest price
                     if prices[lowest_index] <= prices[last2_level_index]:
-                        level_types.pop(last2_level_index)
-                        level_types[lowest_index] = LevelType.SUPPORT
+                        levels.pop(last2_level_index)
+                        levels[lowest_index] = LevelType.SUPPORT
                 else:
                     # Add the lowest price as a second-last support level, preceding the last resistance level
                     if prices[index] / prices[lowest_index] >= 1 + min_price_change_ratio_magnitude:
-                        level_types[lowest_index] = LevelType.SUPPORT
+                        levels[lowest_index] = LevelType.SUPPORT
                 # Update the last resistance level
-                level_types[index] = LevelType.RESISTANCE
-    if len(level_types) == 1:
+                levels[index] = LevelType.RESISTANCE
+    if len(levels) == 1:
         # If no levels are detected other than the initial one, clear the list of levels
-        level_types = OrderedDict()
+        levels = OrderedDict()
     # Simplify the prices using the detected level indices
-    level_indices = list(level_types.keys())
+    level_indices = list(levels.keys())
     if len(level_indices) == 0 or level_indices[0] != 0:
         level_indices.insert(0, 0)
     if len(level_indices) == 0 or level_indices[-1] != len(prices) - 1:
