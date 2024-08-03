@@ -99,14 +99,12 @@ class DailyIndicator:
 class PriceType(Enum):
     ACTUAL = 0
     SIMPLIFIED = 1
-    SMOOTHED = 2
 
 
 class DailyPrice:
     _date: datetime.date
     _actual_price: float
     _simplified_price: float
-    _smoothed_price: float
     _price_delta_ratio: float  # Change in price expressed as a ratio compared to the previous day
     _ema_diff_ratio: float  # Difference in ratio between fast EMA and slow EMA
     _scaled_rsi: float
@@ -116,14 +114,13 @@ class DailyPrice:
     def __init__(
         self,
         date: datetime.date,
-        actual_price: float, simplified_price: float, smoothed_price: float,
+        actual_price: float, simplified_price: float,
         price_delta_ratio: float, ema_diff_ratio: float,
         scaled_rsi: float, scaled_adx: float, scaled_cci: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
         self._simplified_price = simplified_price
-        self._smoothed_price = smoothed_price
         self._price_delta_ratio = price_delta_ratio
         self._ema_diff_ratio = ema_diff_ratio
         self._scaled_rsi = scaled_rsi
@@ -135,8 +132,6 @@ class DailyPrice:
             return self.actual_price
         elif price_type == PriceType.SIMPLIFIED:
             return self.simplified_price
-        elif price_type == PriceType.SMOOTHED:
-            return self.smoothed_price
         else:
             raise NotImplementedError
 
@@ -151,10 +146,6 @@ class DailyPrice:
     @property
     def simplified_price(self) -> float:
         return self._simplified_price
-
-    @property
-    def smoothed_price(self) -> float:
-        return self._smoothed_price
 
     @property
     def price_delta_ratio(self) -> float:
@@ -183,10 +174,8 @@ class DailyAsset(ABC):
     __indicators: List[DailyIndicator]
     __date_indices: Dict[str, int]
 
-    # NOTE: When adding a new hyperparameter to calculate historical and prospective data,
-    # remember to modify `calc_buffer_days_num` method
+    # NOTE: When adding a new hyperparameter to calculate historical data, remember to modify `calc_buffer_days_num` method
     # TODO: Choose better values
-    __SMOOTHED_RADIUS = 2
     __DELTA_DISTANCE = 1
     __EMA_WINDOW_FAST = 5
     __EMA_WINDOW_SLOW = 20
@@ -210,10 +199,10 @@ class DailyAsset(ABC):
         min_date: Optional[datetime.date] = None, max_date: Optional[datetime.date] = None,
         excluding_historical: bool = True,
     ) -> List[datetime.date]:
-        historical_buffer_days_num, prospective_buffer_days_num = self.calc_buffer_days_num()
+        historical_buffer_days_num = self.calc_buffer_days_num()
         if (
             (min_date is not None and max_date is not None and min_date > max_date)
-            or len(self.__candles) < historical_days_num + historical_buffer_days_num + prospective_buffer_days_num
+            or len(self.__candles) < historical_days_num + historical_buffer_days_num
         ):
             raise ValueError
         date_range: List[datetime.date] = []
@@ -232,8 +221,6 @@ class DailyAsset(ABC):
             ):
                 continue
             if max_date is not None and date > max_date:
-                break
-            if i >= (len(self.__candles) - 1) - prospective_buffer_days_num:
                 break
             date_range.append(date)
         return date_range
@@ -290,15 +277,13 @@ class DailyAsset(ABC):
     # The actual price used is usually the close price, except for end date,
     # where there is an option to be randomly chosen within the range of low price to high price.
     def retrieve_historical_prices(self, end_date: datetime.date, days_num: int) -> List[DailyPrice]:
-        historical_buffer_days_num, prospective_buffer_days_num = self.calc_buffer_days_num()
+        historical_buffer_days_num = self.calc_buffer_days_num()
         end_date_index = self.__get_date_index(end_date)
         if (
             end_date_index is None
             # We need `days_num` days for historical data (including the end date),
             # plus a few buffer days to calculate price delta ratios and indicators for the start day.
             or end_date_index < (days_num - 1) + historical_buffer_days_num
-            # We need a few buffer days of prospective data to calculate smoothed prices
-            or end_date_index > (len(self.__indicators) - 1) - prospective_buffer_days_num
         ):
             raise ValueError
         prices: List[DailyPrice] = []
@@ -309,10 +294,6 @@ class DailyAsset(ABC):
                 self.__indicators[i].date,
                 self.__indicators[i].actual_price,
                 self.__indicators[i].simplified_price,
-                sum([
-                    ind.actual_price
-                    for ind in self.__indicators[i - self.__SMOOTHED_RADIUS:i + self.__SMOOTHED_RADIUS + 1]
-                ]) / (2 * self.__SMOOTHED_RADIUS + 1),
                 self.__indicators[i].actual_price / self.__indicators[i - self.__DELTA_DISTANCE].actual_price - 1,
                 self.__indicators[i].emas[0] / self.__indicators[i].emas[1] - 1,
                 self.__indicators[i].rsi / 100,  # RSI range between 0 and 100
@@ -322,18 +303,16 @@ class DailyAsset(ABC):
         return prices
 
     @classmethod
-    def calc_buffer_days_num(cls) -> Tuple[int, int]:
+    def calc_buffer_days_num(cls) -> int:
         # TODO: Check if these buffers are properly selected
         historical_buffer_days_num = max(
-            cls.__SMOOTHED_RADIUS,  # For smoothed prices
             cls.__DELTA_DISTANCE,  # For price delta ratios
             max(cls.__EMA_WINDOW_FAST - 1, cls.__EMA_WINDOW_SLOW - 1),  # For EMA diff ratios' first `nan`s
             cls.__RSI_WINDOW - 1,  # For RSI's first `nan`s
             cls.__ADX_WINDOW * 2 - 1,  # For ADX's first `0`s
             cls.__CCI_WINDOW - 1,  # For CCI's first `nan`s
         )
-        prospective_buffer_days_num = cls.__SMOOTHED_RADIUS
-        return (historical_buffer_days_num, prospective_buffer_days_num)
+        return historical_buffer_days_num
 
     @property
     def symbol(self) -> str:
