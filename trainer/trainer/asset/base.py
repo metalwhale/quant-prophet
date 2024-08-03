@@ -231,7 +231,7 @@ class DailyAsset(ABC):
     def prepare_indicators(
         self,
         close_random_radius: Optional[int] = None,
-        min_price_change_ratio_magnitude: float = 0.0,
+        min_price_change_ratio_magnitude: Optional[float] = None,
     ):
         self.__indicators = []
         highs = []
@@ -255,23 +255,32 @@ class DailyAsset(ABC):
             highs.append(high)
             lows.append(low)
             closes.append(close)
-        highs = pd.Series(highs)
-        lows = pd.Series(lows)
-        closes = pd.Series(closes)
-        for (candle, close, simplified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
+        # Simplify the prices
+        simplified_highs = highs
+        simplified_lows = lows
+        simplified_closes = closes
+        if min_price_change_ratio_magnitude is not None:
+            simplified_highs = simplify(highs, min_price_change_ratio_magnitude)
+            simplified_lows = simplify(lows, min_price_change_ratio_magnitude)
+            simplified_closes = simplify(closes, min_price_change_ratio_magnitude)
+        simplified_highs = pd.Series(simplified_highs)
+        simplified_lows = pd.Series(simplified_lows)
+        simplified_closes = pd.Series(simplified_closes)
+        # Calculate indicators
+        for (candle, actual_close, simplified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
             self.__candles,
-            closes,
-            simplify(closes.to_list(), min_price_change_ratio_magnitude=min_price_change_ratio_magnitude),
-            EMAIndicator(closes, window=self.__EMA_WINDOW_FAST).ema_indicator(),
-            EMAIndicator(closes, window=self.__EMA_WINDOW_SLOW).ema_indicator(),
-            RSIIndicator(closes, window=self.__RSI_WINDOW).rsi(),
-            ADXIndicator(highs, lows, closes, window=self.__ADX_WINDOW).adx(),
-            CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci(),
+            pd.Series(closes),
+            simplified_closes,
+            EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_FAST).ema_indicator(),
+            EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_SLOW).ema_indicator(),
+            RSIIndicator(simplified_closes, window=self.__RSI_WINDOW).rsi(),
+            ADXIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__ADX_WINDOW).adx(),
+            CCIIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__CCI_WINDOW).cci(),
             strict=True,
         ):
             self.__indicators.append(DailyIndicator(
                 candle.date,
-                close, simplified_close,
+                actual_close, simplified_close,
                 (fast_ema, slow_ema),
                 rsi, adx, cci,
             ))
@@ -299,7 +308,11 @@ class DailyAsset(ABC):
                 self.__indicators[i].date,
                 self.__indicators[i].actual_price,
                 self.__indicators[i].simplified_price,
-                self.__indicators[i].actual_price / self.__indicators[i - self.__DELTA_DISTANCE].actual_price - 1,
+                # Features
+                (
+                    self.__indicators[i].simplified_price /
+                    self.__indicators[i - self.__DELTA_DISTANCE].simplified_price - 1
+                ),
                 self.__indicators[i].emas[0] / self.__indicators[i].emas[1] - 1,
                 self.__indicators[i].rsi / 100,  # RSI range between 0 and 100
                 self.__indicators[i].adx / 100,  # ADX range between 0 and 100
@@ -351,7 +364,7 @@ class LevelType(Enum):
     RESISTANCE = 1
 
 
-def simplify(prices: List[float], min_price_change_ratio_magnitude: float = 0.0) -> List[float]:
+def simplify(prices: List[float], min_price_change_ratio_magnitude: float) -> List[float]:
     if min_price_change_ratio_magnitude < 0:
         # Should be positive
         raise ValueError
