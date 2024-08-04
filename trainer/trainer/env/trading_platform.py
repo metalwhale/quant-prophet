@@ -255,6 +255,8 @@ class TradingPlatform(gym.Env):
         YEAR_WIDTH = 2
         SUBPLOT_HEIGHT = 3
         FEATURES = ["ema_diff_ratio", "scaled_rsi", "scaled_adx", "scaled_cci"]
+        TOP_MARGIN = 350
+        BOTTOM_MARGIN = 150
         features_num = len(FEATURES) + 2
         if self.render_mode != "rgb_array":
             return
@@ -276,7 +278,11 @@ class TradingPlatform(gym.Env):
             dpi=400,
             clear=True,
         )
-        figure.subplots_adjust(left=100 / len(dates), bottom=0.02, right=0.99, top=0.95)
+        figure_height = (figure.get_size_inches() * figure.dpi)[1]
+        figure.subplots_adjust(
+            left=100 / len(dates), right=0.99,
+            top=1 - TOP_MARGIN / figure_height, bottom=BOTTOM_MARGIN / figure_height,
+        )
         all_axes: List[Tuple[str, Axes, Dict[datetime.date, float]]] = []
         # Plot prices
         axes = figure.add_subplot(features_num, 1, 1)
