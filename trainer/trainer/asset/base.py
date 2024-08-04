@@ -43,59 +43,6 @@ class DailyCandle:
         return self._close
 
 
-class DailyIndicator:
-    _date: datetime.date
-    _actual_price: float
-    _simplified_price: float
-    _emas: Tuple[float, float]
-    _rsi: float
-    _adx: float
-    _cci: float
-
-    def __init__(
-        self,
-        date: datetime.date,
-        actual_price: float, simplified_price: float,
-        emas: Tuple[float, float],
-        rsi: float, adx: float, cci: float,
-    ) -> None:
-        self._date = date
-        self._actual_price = actual_price
-        self._simplified_price = simplified_price
-        self._emas = emas
-        self._rsi = rsi
-        self._adx = adx
-        self._cci = cci
-
-    @property
-    def date(self) -> datetime.date:
-        return self._date
-
-    @property
-    def actual_price(self) -> float:
-        return self._actual_price
-
-    @property
-    def simplified_price(self) -> float:
-        return self._simplified_price
-
-    @property
-    def emas(self) -> Tuple[float, float]:
-        return self._emas
-
-    @property
-    def rsi(self) -> float:
-        return self._rsi
-
-    @property
-    def adx(self) -> float:
-        return self._adx
-
-    @property
-    def cci(self) -> float:
-        return self._cci
-
-
 class PriceType(Enum):
     ACTUAL = 0
     SIMPLIFIED = 1
@@ -105,7 +52,6 @@ class DailyPrice:
     _date: datetime.date
     _actual_price: float
     _simplified_price: float
-    _price_delta_ratio: float  # Change in price expressed as a ratio compared to the previous day
     _ema_diff_ratio: float  # Difference in ratio between fast EMA and slow EMA
     _scaled_rsi: float
     _scaled_adx: float
@@ -115,13 +61,12 @@ class DailyPrice:
         self,
         date: datetime.date,
         actual_price: float, simplified_price: float,
-        price_delta_ratio: float, ema_diff_ratio: float,
+        ema_diff_ratio: float,
         scaled_rsi: float, scaled_adx: float, scaled_cci: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
         self._simplified_price = simplified_price
-        self._price_delta_ratio = price_delta_ratio
         self._ema_diff_ratio = ema_diff_ratio
         self._scaled_rsi = scaled_rsi
         self._scaled_adx = scaled_adx
@@ -148,10 +93,6 @@ class DailyPrice:
         return self._simplified_price
 
     @property
-    def price_delta_ratio(self) -> float:
-        return self._price_delta_ratio
-
-    @property
     def ema_diff_ratio(self) -> float:
         return self._ema_diff_ratio
 
@@ -171,13 +112,12 @@ class DailyPrice:
 class DailyAsset(ABC):
     __symbol: str
     __candles: List[DailyCandle]
-    __indicators: List[DailyIndicator]
+    __prepared_candles: List[DailyCandle]
     __date_indices: Dict[str, int]
 
     # NOTE: When adding a new hyperparameter to calculate historical and prospective data,
     # remember to modify `calc_buffer_days_num` method
     # TODO: Choose better values
-    __DELTA_DISTANCE = 1
     __EMA_WINDOW_FAST = 5
     __EMA_WINDOW_SLOW = 20
     __RSI_WINDOW = 14
@@ -228,12 +168,8 @@ class DailyAsset(ABC):
             date_range.append(date)
         return date_range
 
-    def prepare_indicators(
-        self,
-        close_random_radius: Optional[int] = None,
-        min_price_change_ratio_magnitude: Optional[float] = None,
-    ):
-        self.__indicators = []
+    def prepare_candles(self, close_random_radius: Optional[int] = None):
+        self.__prepared_candles = []
         highs = []
         lows = []
         closes = []
@@ -255,7 +191,37 @@ class DailyAsset(ABC):
             highs.append(high)
             lows.append(low)
             closes.append(close)
+        for candle, high, low, close in zip(self.__candles, highs, lows, closes, strict=True):
+            self.__prepared_candles.append(DailyCandle(candle.date, high, low, close))
+
+    # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
+    # The actual price used is usually the close price, except for end date,
+    # where there is an option to be randomly chosen within the range of low price to high price.
+    def retrieve_historical_prices(
+        self, end_date: datetime.date, days_num: int,
+        min_price_change_ratio_magnitude: Optional[float],
+    ) -> List[DailyPrice]:
+        historical_buffer_days_num, prospective_buffer_days_num = self.calc_buffer_days_num()
+        end_date_index = self.__get_date_index(end_date)
+        if (
+            end_date_index is None
+            # We need `days_num` days for historical data (including the end date),
+            # plus a few buffer days to calculate indicators for the start day.
+            or end_date_index < (days_num - 1) + historical_buffer_days_num
+            # We need a few buffer days of prospective data just in case
+            or end_date_index > (len(self.__prepared_candles) - 1) - prospective_buffer_days_num
+        ):
+            raise ValueError
         # Simplify the prices
+        dates = []
+        highs = []
+        lows = []
+        closes = []
+        for i in range(end_date_index + 1):
+            dates.append(self.__prepared_candles[i].date)
+            highs.append(self.__prepared_candles[i].high)
+            lows.append(self.__prepared_candles[i].low)
+            closes.append(self.__prepared_candles[i].close)
         simplified_highs = highs
         simplified_lows = lows
         simplified_closes = closes
@@ -263,60 +229,27 @@ class DailyAsset(ABC):
             simplified_highs = simplify(highs, min_price_change_ratio_magnitude)
             simplified_lows = simplify(lows, min_price_change_ratio_magnitude)
             simplified_closes = simplify(closes, min_price_change_ratio_magnitude)
+        actual_closes = pd.Series(closes)
         simplified_highs = pd.Series(simplified_highs)
         simplified_lows = pd.Series(simplified_lows)
         simplified_closes = pd.Series(simplified_closes)
         # Calculate indicators
-        for (candle, actual_close, simplified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
-            self.__candles,
-            pd.Series(closes),
-            simplified_closes,
-            EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_FAST).ema_indicator(),
-            EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_SLOW).ema_indicator(),
-            RSIIndicator(simplified_closes, window=self.__RSI_WINDOW).rsi(),
-            ADXIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__ADX_WINDOW).adx(),
-            CCIIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__CCI_WINDOW).cci(),
-            strict=True,
-        ):
-            self.__indicators.append(DailyIndicator(
-                candle.date,
-                actual_close, simplified_close,
-                (fast_ema, slow_ema),
-                rsi, adx, cci,
-            ))
-
-    # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
-    # The actual price used is usually the close price, except for end date,
-    # where there is an option to be randomly chosen within the range of low price to high price.
-    def retrieve_historical_prices(self, end_date: datetime.date, days_num: int) -> List[DailyPrice]:
-        historical_buffer_days_num, prospective_buffer_days_num = self.calc_buffer_days_num()
-        end_date_index = self.__get_date_index(end_date)
-        if (
-            end_date_index is None
-            # We need `days_num` days for historical data (including the end date),
-            # plus a few buffer days to calculate price delta ratios and indicators for the start day.
-            or end_date_index < (days_num - 1) + historical_buffer_days_num
-            # We need a few buffer days of prospective data just in case
-            or end_date_index > (len(self.__indicators) - 1) - prospective_buffer_days_num
-        ):
-            raise ValueError
-        prices: List[DailyPrice] = []
+        fast_emas = EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_FAST).ema_indicator()
+        slow_emas = EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_SLOW).ema_indicator()
+        rsis = RSIIndicator(simplified_closes, window=self.__RSI_WINDOW).rsi()
+        adxs = ADXIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__ADX_WINDOW).adx()
+        ccis = CCIIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__CCI_WINDOW).cci()
         # Historical prices for the days before `end_date`
+        prices: List[DailyPrice] = []
         start_date_index = end_date_index - (days_num - 1)
         for i in range(start_date_index, end_date_index + 1):
             prices.append(DailyPrice(
-                self.__indicators[i].date,
-                self.__indicators[i].actual_price,
-                self.__indicators[i].simplified_price,
-                # Features
-                (
-                    self.__indicators[i].simplified_price /
-                    self.__indicators[i - self.__DELTA_DISTANCE].simplified_price - 1
-                ),
-                self.__indicators[i].emas[0] / self.__indicators[i].emas[1] - 1,
-                self.__indicators[i].rsi / 100,  # RSI range between 0 and 100
-                self.__indicators[i].adx / 100,  # ADX range between 0 and 100
-                self.__indicators[i].cci / 400,  # TODO: Choose a better bound for CCI
+                dates[i],
+                actual_closes[i], simplified_closes[i],
+                fast_emas[i] / slow_emas[i] - 1,
+                rsis[i] / 100,  # RSI range between 0 and 100
+                adxs[i] / 100,  # ADX range between 0 and 100
+                ccis[i] / 400,  # TODO: Choose a better bound for CCI
             ))
         return prices
 
@@ -324,7 +257,6 @@ class DailyAsset(ABC):
     def calc_buffer_days_num(cls) -> Tuple[int, int]:
         # TODO: Check if these buffers are properly selected
         historical_buffer_days_num = max(
-            cls.__DELTA_DISTANCE,  # For price delta ratios
             max(cls.__EMA_WINDOW_FAST - 1, cls.__EMA_WINDOW_SLOW - 1),  # For EMA diff ratios' first `nan`s
             cls.__RSI_WINDOW - 1,  # For RSI's first `nan`s
             cls.__ADX_WINDOW * 2 - 1,  # For ADX's first `0`s

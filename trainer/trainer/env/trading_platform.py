@@ -174,7 +174,6 @@ class TradingPlatform(gym.Env):
         self.observation_space = gym.spaces.Dict({
             # Suppose that delta and diff values (ratios) are greater than -1 and less than 1,
             # meaning prices and other indicators never drop to 0 and never double from previous day.
-            "historical_price_delta_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             "historical_ema_diff_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             "historical_scaled_rsis": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
             "historical_scaled_adxs": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
@@ -199,10 +198,7 @@ class TradingPlatform(gym.Env):
             randomizing_start=self.is_training,
             preferring_secondary=preferring_secondary,
         )
-        self._asset.prepare_indicators(
-            close_random_radius=self._CLOSE_RANDOM_RADIUS if self.is_training else None,
-            min_price_change_ratio_magnitude=self._MIN_PRICE_CHANGE_RATIO_MAGNITUDE,
-        )
+        self._asset.prepare_candles(close_random_radius=self._CLOSE_RANDOM_RADIUS if self.is_training else None)
         self._date_index = 0
         self._retrieve_prices()
         self._positions = []
@@ -265,6 +261,7 @@ class TradingPlatform(gym.Env):
             self._date_range[self._date_index],
             # Retrieve all the days before the current date in the date range
             self._date_index + self._historical_days_num,
+            self._MIN_PRICE_CHANGE_RATIO_MAGNITUDE,
         )
         # TODO: Adjust the x-axis to represent dates linearly, rather than based on datetime values,
         # to ensure that the distance between consecutive data points remains consistent.
@@ -442,12 +439,14 @@ class TradingPlatform(gym.Env):
         date = self._date_range[self._date_index]
         if hasattr(self, "_prices") and len(self._prices) > 0 and self._prices[-1].date == date:
             return
-        self._prices = self._asset.retrieve_historical_prices(date, self._historical_days_num)
+        self._prices = self._asset.retrieve_historical_prices(
+            date, self._historical_days_num,
+            self._MIN_PRICE_CHANGE_RATIO_MAGNITUDE,
+        )
 
     def _obtain_observation(self) -> Dict[str, Any]:
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
-            "historical_price_delta_ratios": np.array([p.price_delta_ratio for p in self._prices]),
             "historical_ema_diff_ratios": np.array([p.ema_diff_ratio for p in self._prices]),
             "historical_scaled_rsis": np.array([p.scaled_rsi for p in self._prices]),
             "historical_scaled_adxs": np.array([p.scaled_adx for p in self._prices]),
