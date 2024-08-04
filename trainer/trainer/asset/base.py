@@ -168,14 +168,23 @@ class DailyPrice:
         return self._scaled_cci
 
 
+class LevelType(Enum):
+    SUPPORT = 0
+    RESISTANCE = 1
+
+
 class DailyAsset(ABC):
     __symbol: str
+    # Initialized only once
     __candles: List[DailyCandle]
-    __indicators: List[DailyIndicator]
     __date_indices: Dict[str, int]
+    # Recalculated when preparing indicator values
+    __indicators: List[DailyIndicator]
+    __levels: Optional[OrderedDict[int, LevelType]]
 
-    # NOTE: When adding a new hyperparameter to calculate historical data, remember to modify `calc_buffer_days_num` method
     # TODO: Choose better values
+    __MIN_PRICE_CHANGE_RATIO_MAGNITUDE: Optional[float] = None
+    # NOTE: When adding a new hyperparameter to calculate historical data, remember to modify `calc_buffer_days_num` method
     __DELTA_DISTANCE = 1
     __EMA_WINDOW_FAST = 5
     __EMA_WINDOW_SLOW = 20
@@ -225,11 +234,7 @@ class DailyAsset(ABC):
             date_range.append(date)
         return date_range
 
-    def prepare_indicators(
-        self,
-        close_random_radius: Optional[int] = None,
-        min_price_change_ratio_magnitude: Optional[float] = None,
-    ):
+    def prepare_indicators(self, close_random_radius: Optional[int] = None):
         self.__indicators = []
         highs = []
         lows = []
@@ -256,14 +261,17 @@ class DailyAsset(ABC):
         simplified_highs = highs
         simplified_lows = lows
         simplified_closes = closes
-        if min_price_change_ratio_magnitude is not None:
-            simplified_highs = simplify(highs, min_price_change_ratio_magnitude)
-            simplified_lows = simplify(lows, min_price_change_ratio_magnitude)
-            simplified_closes = simplify(closes, min_price_change_ratio_magnitude)
+        if self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE is not None:
+            self.__levels = _detect_levels(closes, self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE)
+            simplified_highs = _simplify(highs, levels=self.__levels)
+            simplified_lows = _simplify(lows, levels=self.__levels)
+            simplified_closes = _simplify(closes, levels=self.__levels)
+        else:
+            self.__levels = None
         simplified_highs = pd.Series(simplified_highs)
         simplified_lows = pd.Series(simplified_lows)
         simplified_closes = pd.Series(simplified_closes)
-        # Calculate features
+        # Calculate indicators
         for (candle, actual_close, simplified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
             self.__candles,
             pd.Series(closes),
@@ -296,22 +304,25 @@ class DailyAsset(ABC):
         ):
             raise ValueError
         prices: List[DailyPrice] = []
-        # Historical prices for the days before `end_date`
+        # Recalculate the indicators
         start_date_index = end_date_index - (days_num - 1)
-        for i in range(start_date_index, end_date_index + 1):
+        indicators: List[DailyIndicator]
+        if self.__levels is None:
+            indicators = self.__indicators[start_date_index:end_date_index + 1]
+        else:
+            indicators = self.__recalc_indicators(start_date_index, end_date_index)
+        # Historical prices for the days before `end_date`
+        for i in range(len(indicators)):
             prices.append(DailyPrice(
-                self.__indicators[i].date,
-                self.__indicators[i].actual_price,
-                self.__indicators[i].simplified_price,
+                indicators[i].date,
+                indicators[i].actual_price,
+                indicators[i].simplified_price,
                 # Features
-                (
-                    self.__indicators[i].simplified_price /
-                    self.__indicators[i - self.__DELTA_DISTANCE].simplified_price - 1
-                ),
-                self.__indicators[i].emas[0] / self.__indicators[i].emas[1] - 1,
-                self.__indicators[i].rsi / 100,  # RSI range between 0 and 100
-                self.__indicators[i].adx / 100,  # ADX range between 0 and 100
-                self.__indicators[i].cci / 400,  # TODO: Choose a better bound for CCI
+                indicators[i].simplified_price / indicators[i - self.__DELTA_DISTANCE].simplified_price - 1,
+                indicators[i].emas[0] / indicators[i].emas[1] - 1,
+                indicators[i].rsi / 100,  # RSI range between 0 and 100
+                indicators[i].adx / 100,  # ADX range between 0 and 100
+                indicators[i].cci / 400,  # TODO: Choose a better bound for CCI
             ))
         return prices
 
@@ -352,20 +363,67 @@ class DailyAsset(ABC):
     def __get_date_index(self, date: datetime.date) -> Optional[int]:
         return self.__date_indices.get(date.strftime(self.__DATE_FORMAT))
 
+    # Chronological order of the terms mentioned in this function:
+    # "recalc start" -> "last prev level" ("second-last level") -> "end date" -> "next level" ("last level")
+    def __recalc_indicators(self, start_date_index: int, end_date_index: int) -> List[DailyIndicator]:
+        # List the levels that appear before the end date
+        prev_level_indices = [i for i in self.__levels.keys() if i <= end_date_index]
+        if len(prev_level_indices) >= 1 and prev_level_indices[-1] != end_date_index:
+            # When updating the "last level", we might also need to update the "second-last level"
+            # (see "Case 2" in the `_detect_levels` function).
+            # Here we don't know the index of the next level ("last level") because it appears after the end date.
+            # Therefore, we must assume that the index of the last level right before the end date ("second-last level")
+            # when we have data up to the end date is different from the index when we have data up to the next level.
+            # We handle this by removing the last level right before the end date ("second-last level")
+            # and rerunning the detect function, with data up to the end date.
+            prev_level_indices.pop()
+        # We start recalculating from the level before the "second-last level" (exclusive)
+        recalc_start_index = 0 if len(prev_level_indices) == 0 else prev_level_indices[-1]
+        end_closes = [i.actual_price for i in self.__indicators[recalc_start_index:end_date_index + 1]]
+        # Detect levels between the start level and the end date because as explained above,
+        # these levels might differ from those stored in `self.__levels`, since we only have data up to the end date.
+        end_levels = _detect_levels(
+            end_closes, self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE,
+            first_level_type=self.__levels.get(recalc_start_index, LevelType.SUPPORT),
+        )
+        # We need candle from the start level to be the first price when simplifying the prices up to end date.
+        # However, since we don't need to recalculate its indicators, we remove it with `[1:]`.
+        simplified_end_closes = _simplify(end_closes, levels=end_levels)[1:]
+        # Calculate the end indicators
+        end_indicators: List[DailyIndicator] = []
+        emas = self.__indicators[recalc_start_index].emas
+        for indicator, simplified_end_close in zip(
+            self.__indicators[recalc_start_index + 1:end_date_index + 1],
+            simplified_end_closes,
+            strict=True,
+        ):
+            emas = (
+                _calc_ema(simplified_end_close, emas[0], self.__EMA_WINDOW_FAST),
+                _calc_ema(simplified_end_close, emas[1], self.__EMA_WINDOW_SLOW),
+            )
+            end_indicators.append(DailyIndicator(
+                indicator.date,
+                indicator.actual_price, simplified_end_close,
+                emas,
+                # TODO: Calculate other indicators
+                0, 0, 0,
+            ))
+        # There are cases where the start date index appears after the index from which we start recalculating
+        indicators = self.__indicators[start_date_index:recalc_start_index + 1] \
+            + end_indicators[max(0, start_date_index - (recalc_start_index + 1)):]
+        return indicators
 
-class LevelType(Enum):
-    SUPPORT = 0
-    RESISTANCE = 1
 
-
-def simplify(prices: List[float], min_price_change_ratio_magnitude: float) -> List[float]:
+def _detect_levels(
+    prices: List[float], min_price_change_ratio_magnitude: float,
+    first_level_type: LevelType = LevelType.SUPPORT,
+) -> OrderedDict[int, LevelType]:
     if min_price_change_ratio_magnitude < 0:
         # Should be positive
         raise ValueError
-    # Detect levels
     levels: OrderedDict[int, LevelType] = OrderedDict()
     index = 0
-    levels[index] = LevelType.RESISTANCE  # An arbitrary initial level, which can be set to any level type
+    levels[index] = first_level_type
     while index < len(prices) - 1:
         index += 1
         last1_level_index = list(levels.keys())[-1]
@@ -421,8 +479,16 @@ def simplify(prices: List[float], min_price_change_ratio_magnitude: float) -> Li
     if len(levels) == 1:
         # If no levels are detected other than the initial one, clear the list of levels
         levels = OrderedDict()
-    # Simplify the prices using the detected level indices
+    return levels
+
+
+def _simplify(prices: List[float], levels: Optional[OrderedDict[int, LevelType]] = None) -> List[float]:
+    if levels is None:
+        return prices
     level_indices = list(levels.keys())
+    # Since levels act as "anchors" for us to "stretch the prices into a straight line" between them,
+    # we need to treat the first and last prices like other levels, otherwise we won't have any "anchors"
+    # to simplify the prices after the first price and before the last price.
     if len(level_indices) == 0 or level_indices[0] != 0:
         level_indices.insert(0, 0)
     if len(level_indices) == 0 or level_indices[-1] != len(prices) - 1:
@@ -430,7 +496,15 @@ def simplify(prices: List[float], min_price_change_ratio_magnitude: float) -> Li
     simplified_prices: List[float] = []
     for index, next_index in zip(level_indices[:len(level_indices) - 1], level_indices[1:]):
         for i in range(index, next_index):
-            simplified_price = prices[index] + (prices[next_index] - prices[index]) * (i - index) / (next_index - index)
+            # "Stretch" the prices
+            simplified_price = prices[index] \
+                + (prices[next_index] - prices[index]) * (i - index) / (next_index - index)
             simplified_prices.append(simplified_price)
     simplified_prices.append(prices[-1])
     return simplified_prices
+
+
+def _calc_ema(price: float, prev_ema: float, window: int) -> float:
+    ema_smoothing_factor = 2 / (window + 1)  # See: https://www.investopedia.com/terms/e/ema.asp
+    ema = ema_smoothing_factor * price + (1 - ema_smoothing_factor) * prev_ema
+    return ema

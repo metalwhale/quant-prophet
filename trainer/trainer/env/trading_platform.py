@@ -152,7 +152,6 @@ class TradingPlatform(gym.Env):
     _POSITION_AMOUNT_UNIT: float = 100.0
     _ASSET_TYPE_WEIGHTS: Tuple[float, float] = [1.0, 0.0]  # (primary, secondary)
     _CLOSE_RANDOM_RADIUS: Optional[int] = 0
-    _MIN_PRICE_CHANGE_RATIO_MAGNITUDE: Optional[float] = 0.1  # TODO: Choose a better value
 
     def __init__(
         self,
@@ -200,10 +199,7 @@ class TradingPlatform(gym.Env):
             randomizing_start=self.is_training,
             preferring_secondary=preferring_secondary,
         )
-        self._asset.prepare_indicators(
-            close_random_radius=self._CLOSE_RANDOM_RADIUS if self.is_training else None,
-            min_price_change_ratio_magnitude=self._MIN_PRICE_CHANGE_RATIO_MAGNITUDE,
-        )
+        self._asset.prepare_indicators(close_random_radius=self._CLOSE_RANDOM_RADIUS if self.is_training else None)
         self._date_index = 0
         self._retrieve_prices()
         self._positions = []
