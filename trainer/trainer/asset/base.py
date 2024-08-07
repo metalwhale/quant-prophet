@@ -2,7 +2,7 @@ import datetime
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -183,7 +183,7 @@ class DailyAsset(ABC):
     __levels: Optional[OrderedDict[int, LevelType]]
 
     # TODO: Choose better values
-    __MIN_PRICE_CHANGE_RATIO_MAGNITUDE: Optional[float] = None
+    __MIN_PRICE_CHANGE_RATIO_MAGNITUDE: Optional[Union[float, Tuple[float, float]]] = None
     # NOTE: When adding a new hyperparameter to calculate historical data, remember to modify `calc_buffer_days_num` method
     __DELTA_DISTANCE = 1
     __EMA_WINDOW_FAST = 5
@@ -262,10 +262,10 @@ class DailyAsset(ABC):
         simplified_lows = lows
         simplified_closes = closes
         if self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE is not None:
-            self.__levels = _detect_levels(closes, self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE)
-            simplified_highs = _simplify(highs, levels=self.__levels)
-            simplified_lows = _simplify(lows, levels=self.__levels)
-            simplified_closes = _simplify(closes, levels=self.__levels)
+            self.__levels = detect_levels(closes, self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE)
+            simplified_highs = simplify(highs, levels=self.__levels)
+            simplified_lows = simplify(lows, levels=self.__levels)
+            simplified_closes = simplify(closes, levels=self.__levels)
         else:
             self.__levels = None
         simplified_highs = pd.Series(simplified_highs)
@@ -370,7 +370,7 @@ class DailyAsset(ABC):
         prev_level_indices = [i for i in self.__levels.keys() if i <= end_date_index]
         if len(prev_level_indices) >= 1 and prev_level_indices[-1] != end_date_index:
             # When updating the "last level", we might also need to update the "second-last level"
-            # (see "Case 2" in the `_detect_levels` function).
+            # (see "Case 2" in the `detect_levels` function).
             # Here we don't know the index of the next level ("last level") because it appears after the end date.
             # Therefore, we must assume that the index of the last level right before the end date ("second-last level")
             # when we have data up to the end date is different from the index when we have data up to the next level.
@@ -382,13 +382,15 @@ class DailyAsset(ABC):
         end_closes = [i.actual_price for i in self.__indicators[recalc_start_index:end_date_index + 1]]
         # Detect levels between the start level and the end date because as explained above,
         # these levels might differ from those stored in `self.__levels`, since we only have data up to the end date.
-        end_levels = _detect_levels(
+        if self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE is None:
+            raise ValueError
+        end_levels = detect_levels(
             end_closes, self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE,
             first_level_type=self.__levels.get(recalc_start_index, LevelType.SUPPORT),
         )
         # We need candle from the start level to be the first price when simplifying the prices up to end date.
         # However, since we don't need to recalculate its indicators, we remove it with `[1:]`.
-        simplified_end_closes = _simplify(end_closes, levels=end_levels)[1:]
+        simplified_end_closes = simplify(end_closes, levels=end_levels)[1:]
         # Calculate the end indicators
         end_indicators: List[DailyIndicator] = []
         emas = self.__indicators[recalc_start_index].emas
@@ -414,12 +416,59 @@ class DailyAsset(ABC):
         return indicators
 
 
-def _detect_levels(
-    prices: List[float], min_price_change_ratio_magnitude: float,
+# In "Case 2" updating the last level requires checking for a new value in the second-last level.
+# Initially, it might seem like that after updating the second-last level we need to apply a same rule recursively,
+# and update all previous levels back to the first level, but this is not necessary.
+#
+# To understand this, we need to know why updating the last level might also require updating the second-last level.
+# Let's imagine we have a support at the second-last level and a resistance at the last level (old index).
+# When prices continue to move, we encounter a new higher value (new index).
+# In this case, we want to update the last resistance level from its old index to the new index.
+# A problem is that there may be a value in the range from the old index to the new index of the last resistance level
+# that is lower than value of the second-last support level.
+# The case where the second-last level is a resistance and the last level is a support is similar.
+#
+# However, we only need to update the second-last level if the last level is either support or resistance.
+# The case we should handle depends on the relationship between minimum price change ratios of two level types.
+# Reason is that we need to handle both cases if and only if the following conditions are both met:
+# - (1): There are S1 -> R1 -> S2 in chronological order, where S1 is a support, R1 is a resistance,
+#   and S2 is lower than S1 but not a support (not sufficiently lower than R1 by a specified support ratio).
+#   In this case, if an R2 value appears after S2 that is higher than R1,
+#   then R2 will become the new resistance and S2 will become the new support.
+# - (2): Similar to (1) but with R1 -> S1 -> R2 in chronological order, where R1 is a resistance, S1 is a support,
+#   and R2 is higher than R1 but not a resistance (not sufficiently higher than S1 by a specified resistance ratio).
+# Let's prove that (1) and (2) cannot both be true.
+#
+# Denote mS as the magnitude of the minimum price change ratio for support, and mR as the magnitude for resistance.
+# In case of (1), assume that value of R1 is 1 unit. Then value of S1 is < 1/(1+mR). Since S2 < S1, value of S2 is < 1/(1+mR).
+# For (1) to be true, S2 must be > 1-mS so that it cannot be the support after R1.
+# Combining these formulas, we have (I): 1-mS < 1/(1+mR).
+# Applying to (2), we have (II): 1+mR > 1/(1-mS).
+# Mathematically, (I) and (II) cannot both be true, this means we only need to update the second-last level
+# if either the last level is support or resistance (depending on how we choose the ratios), but not in both cases.
+# In other words, when updating the last level to a new value, the oldest levels we need to retrace are up to the second-last level.
+#
+# TODO:
+# The following function implements "Case 2" to always update both the last and second-last levels,
+# regardless of whether the last level is support or resistance.
+# According to the above argument, this is redundant, and we should add checking code to avoid unnecessary handling.
+def detect_levels(
+    prices: List[float],
+    min_price_change_ratio_magnitude: Union[float, Tuple[float, float]],
     first_level_type: LevelType = LevelType.SUPPORT,
 ) -> OrderedDict[int, LevelType]:
-    if min_price_change_ratio_magnitude < 0:
-        # Should be positive
+    min_support: float
+    min_resistance: float
+    if isinstance(min_price_change_ratio_magnitude, float):
+        min_support = min_price_change_ratio_magnitude
+        min_resistance = min_price_change_ratio_magnitude
+    elif isinstance(min_price_change_ratio_magnitude, tuple):
+        min_support, min_resistance = min_price_change_ratio_magnitude
+    if (
+        min_support < 0 or min_support > 1
+        or min_resistance < 0 or min_resistance > 1
+    ):
+        # Must be in the range 0 to 1
         raise ValueError
     levels: OrderedDict[int, LevelType] = OrderedDict()
     index = 0
@@ -430,7 +479,7 @@ def _detect_levels(
         last2_level_index = list(levels.keys())[-2] if len(levels) >= 2 else None
         if levels[last1_level_index] == LevelType.SUPPORT:
             # Case 1: Add a new resistance level if its price is higher than the last support level by a specified ratio
-            if prices[index] / prices[last1_level_index] >= 1 + min_price_change_ratio_magnitude:
+            if prices[index] / prices[last1_level_index] >= 1 + min_resistance:
                 levels[index] = LevelType.RESISTANCE
             # Case 2: Update the last support level if the new price is lower
             elif prices[index] <= prices[last1_level_index]:
@@ -448,13 +497,13 @@ def _detect_levels(
                         levels[highest_index] = LevelType.RESISTANCE
                 else:
                     # Add the highest price as a second-last resistance level, preceding the last support level
-                    if prices[index] / prices[highest_index] <= 1 - min_price_change_ratio_magnitude:
+                    if prices[index] / prices[highest_index] <= 1 - min_support:
                         levels[highest_index] = LevelType.RESISTANCE
                 # Update the last support level
                 levels[index] = LevelType.SUPPORT
         elif levels[last1_level_index] == LevelType.RESISTANCE:
             # Case 1: Add a new support level if its price is lower than the last resistance level by a specified ratio
-            if prices[index] / prices[last1_level_index] <= 1 - min_price_change_ratio_magnitude:
+            if prices[index] / prices[last1_level_index] <= 1 - min_support:
                 levels[index] = LevelType.SUPPORT
             # Case 2: Update the last resistance level if the new price is higher
             elif prices[index] >= prices[last1_level_index]:
@@ -472,7 +521,7 @@ def _detect_levels(
                         levels[lowest_index] = LevelType.SUPPORT
                 else:
                     # Add the lowest price as a second-last support level, preceding the last resistance level
-                    if prices[index] / prices[lowest_index] >= 1 + min_price_change_ratio_magnitude:
+                    if prices[index] / prices[lowest_index] >= 1 + min_resistance:
                         levels[lowest_index] = LevelType.SUPPORT
                 # Update the last resistance level
                 levels[index] = LevelType.RESISTANCE
@@ -482,7 +531,7 @@ def _detect_levels(
     return levels
 
 
-def _simplify(prices: List[float], levels: Optional[OrderedDict[int, LevelType]] = None) -> List[float]:
+def simplify(prices: List[float], levels: Optional[OrderedDict[int, LevelType]] = None) -> List[float]:
     if levels is None:
         return prices
     level_indices = list(levels.keys())

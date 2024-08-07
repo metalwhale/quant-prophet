@@ -60,8 +60,8 @@ def generate_stock_assets() -> List[Stock]:
     return assets
 
 
-def generate_zigzag_assets(assets_num: int) -> List[Zigzag]:
-    PUBLISHED_DATE = datetime.datetime.strptime("1980-01-01", "%Y-%m-%d").date()  # Before `LAST_TRAINING_DATE`
+def generate_zigzag_assets(published_date_str: str, assets_num: int) -> List[Zigzag]:
+    PUBLISHED_DATE = datetime.datetime.strptime(published_date_str, "%Y-%m-%d").date()  # Before `LAST_TRAINING_DATE`
     assets = []
     for i in range(assets_num):
         up_weight = np.random.uniform(0.51, 0.53)
@@ -81,7 +81,7 @@ def train(env_type: str):
     if env_type == "stock":
         train_env, eval_envs = generate_envs(generate_stock_assets())
     elif env_type == "zigzag":
-        train_env, eval_envs = generate_envs(generate_zigzag_assets(5))
+        train_env, eval_envs = generate_envs(generate_zigzag_assets("1980-01-01", 5))
     now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     model = DQN(
         "MultiInputPolicy", train_env,
