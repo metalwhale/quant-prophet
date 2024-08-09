@@ -6,11 +6,11 @@ from typing import Dict, List, Tuple
 import numpy as np
 from stable_baselines3 import DQN
 
-from trainer.asset.base import DailyAsset, PriceType
+from trainer.asset.base import DailyAsset
 from trainer.asset.stock import Stock, StockIndex
 from trainer.asset.zigzag import Zigzag
 from trainer.env.asset_pool import AssetPool
-from trainer.env.trading_platform import MONTHLY_TRADABLE_DAYS_NUM, TradingPlatform
+from trainer.env.trading_platform import MONTHLY_TRADABLE_DAYS_NUM, PriceType, TradingPlatform
 from trainer.env.evaluation import FullEvalCallback
 
 
