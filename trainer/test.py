@@ -6,7 +6,7 @@ from ta.trend import EMAIndicator
 
 from trainer.asset.base import DailyAsset, detect_levels, simplify
 from trainer.env.asset_pool import AssetPool
-from trainer.env.trading_platform import PriceType, TradingPlatform
+from trainer.env.trading_platform import AmountType, PriceType, TradingPlatform
 from train import generate_zigzag_assets
 
 
@@ -17,12 +17,12 @@ def test_earning_calculation() -> bool:
     asset_pool = AssetPool(generate_zigzag_assets(PUBLISHED_DATE_STR, 100))
     asset_pool.apply_date_range((None, None), HISTORICAL_DAYS_NUM)
     env = TradingPlatform(asset_pool, HISTORICAL_DAYS_NUM)
-    env.is_training = True
+    env._randomizing = True
     for i in range(1000):
         if i % 100 == 0:
             print(i)
-        env.position_net_price_type = np.random.choice([PriceType.ACTUAL, PriceType.SIMPLIFIED])
-        env.using_fixed_position_amount = np.random.choice([True, False])
+        env._position_net_price_type = np.random.choice([PriceType.ACTUAL, PriceType.SIMPLIFIED])
+        env._position_amount_type = np.random.choice([AmountType.UNIT, AmountType.SPOT])
         _, (platform_earning, calculated_earning, *_), _ = env.trade(
             max_step=np.random.randint(10, 120), rendering=False,
         )

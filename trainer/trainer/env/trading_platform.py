@@ -76,6 +76,11 @@ class PriceType(Enum):
     SIMPLIFIED = 1
 
 
+class AmountType(Enum):
+    UNIT = 0
+    SPOT = 1
+
+
 # Doc:
 # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/environment_creation/
 # - https://stable-baselines3.readthedocs.io/en/v2.3.2/guide/custom_env.html
@@ -90,12 +95,13 @@ class TradingPlatform(gym.Env):
 
     metadata = {"render_modes": ["rgb_array"]}
 
-    # Control flags
-    is_training: bool
-    position_net_price_type: PriceType
-    using_fixed_position_amount: bool
     favorite_symbols: Optional[List[str]]
     figure_num: str
+
+    # Control flags
+    _randomizing: bool
+    _position_net_price_type: PriceType
+    _position_amount_type: AmountType
 
     # Terminology
     # "Episode" and "step":
@@ -163,10 +169,6 @@ class TradingPlatform(gym.Env):
         historical_days_num: int,
     ) -> None:
         super().__init__()
-        # Control flags
-        self.is_training = True
-        self.position_net_price_type = PriceType.ACTUAL
-        self.using_fixed_position_amount = True
         self.favorite_symbols = None
         self.figure_num = ""
         # Parameters
@@ -193,17 +195,17 @@ class TradingPlatform(gym.Env):
     ) -> tuple[Dict[str, Any], dict[str, Any]]:
         super().reset(seed=seed, options=options)
         preferring_secondary = (
-            self.is_training and self._asset_pool.is_secondary_generatable
+            self._randomizing and self._asset_pool.is_secondary_generatable
             and np.random.choice([False, True], p=self._ASSET_TYPE_WEIGHTS)
         )
         if preferring_secondary:
             self._asset_pool.renew_secondary_assets()
         self._asset_symbol, self._date_range = self._asset_pool.choose_asset_date(
             favorite_symbols=self.favorite_symbols,
-            randomizing_start=self.is_training,
+            randomizing_start=self._randomizing,
             preferring_secondary=preferring_secondary,
         )
-        self._asset.prepare_indicators(close_random_radius=self._CLOSE_RANDOM_RADIUS if self.is_training else None)
+        self._asset.prepare_indicators(close_random_radius=self._CLOSE_RANDOM_RADIUS if self._randomizing else None)
         self._date_index = 0
         self._retrieve_prices()
         self._positions = []
@@ -216,12 +218,9 @@ class TradingPlatform(gym.Env):
         reward = 0
         # If the position type changes, close the current position and open a new one
         if len(self._positions) == 0 or action != self._positions[-1].position_type.value:
-            self._positions.append(Position(
-                self._prices[-1].date,
-                PositionType(action),
-                self._prices[-1],
-                self._POSITION_AMOUNT_UNIT if self.using_fixed_position_amount else self._prices[-1].actual_price,
-            ))
+            amount = self._POSITION_AMOUNT_UNIT if self._position_amount_type == AmountType.UNIT \
+                else self._prices[-1].actual_price
+            self._positions.append(Position(self._prices[-1].date, PositionType(action), self._prices[-1], amount))
         # Recalculate position's net by first reverting net of the current date.
         # The net of the next date will be calculated later.
         earning = -self._positions[-1].amount * self._last_position_net_ratio
@@ -407,7 +406,7 @@ class TradingPlatform(gym.Env):
         # Calculate the earning
         calculated_earning, price_change, wl_rate = _calc_earning(
             self._positions, self._prices[-1],
-            self.position_net_price_type,
+            self._position_net_price_type,
         )
         # Platform earning and self-calculated earning should be equal
         platform_earning = self._extra_info.earning
@@ -416,6 +415,11 @@ class TradingPlatform(gym.Env):
             (platform_earning, calculated_earning, price_change, wl_rate),
             (self._positions, self._prices[-1]),
         )
+
+    def set_mode(self, is_training: bool):
+        self._randomizing = is_training
+        self._position_net_price_type = PriceType.SIMPLIFIED if is_training else PriceType.ACTUAL
+        self._position_amount_type = AmountType.UNIT if is_training else AmountType.SPOT
 
     @property
     def asset_pool(self) -> AssetPool:
@@ -427,7 +431,7 @@ class TradingPlatform(gym.Env):
 
     @property
     def _last_position_net_ratio(self) -> float:
-        return _calc_position_net_ratio(self._positions[-1], self._prices[-1], self.position_net_price_type)
+        return _calc_position_net_ratio(self._positions[-1], self._prices[-1], self._position_net_price_type)
 
     # Should be called right after updating `self._date_index` to the newest date
     def _retrieve_prices(self):

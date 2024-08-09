@@ -65,7 +65,7 @@ class FullEvalCallback(BaseCallback):
         avg_result: Dict[str, Any] = {"ep_count": self._ep_count}
         asset_results: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"ep_count": self._ep_count})
         for env_name, env in self._envs.items():
-            env.is_training = False  # Just in case
+            env.set_mode(False)  # Just in case
             earning_discrepancy_sum = 0.0
             wl_rate_sum = 0.0
             for symbol in env.asset_pool.primary_symbols:
