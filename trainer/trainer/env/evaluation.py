@@ -92,7 +92,7 @@ class FullEvalCallback(BaseCallback):
                     for position in positions:
                         positions_writer.writerow({
                             "date": position.date,
-                            "entry_price": position.entry_price,
+                            "entry_price": position.entry_price.actual_price,
                             "position_type": position.position_type.name,
                         })
                     positions_writer.writerow({

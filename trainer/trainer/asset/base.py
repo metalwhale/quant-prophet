@@ -46,7 +46,8 @@ class DailyCandle:
 class DailyIndicator:
     _date: datetime.date
     _actual_price: float
-    _simplified_price: float
+    _general_simplified_price: float
+    _spot_simplified_price: float
     _emas: Tuple[float, float]
     _rsi: float
     _adx: float
@@ -54,14 +55,13 @@ class DailyIndicator:
 
     def __init__(
         self,
-        date: datetime.date,
-        actual_price: float, simplified_price: float,
-        emas: Tuple[float, float],
-        rsi: float, adx: float, cci: float,
+        date: datetime.date, actual_price: float, general_simplified_price: float,
+        spot_simplified_price: float, emas: Tuple[float, float], rsi: float, adx: float, cci: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
-        self._simplified_price = simplified_price
+        self._general_simplified_price = general_simplified_price
+        self._spot_simplified_price = spot_simplified_price
         self._emas = emas
         self._rsi = rsi
         self._adx = adx
@@ -76,8 +76,12 @@ class DailyIndicator:
         return self._actual_price
 
     @property
-    def simplified_price(self) -> float:
-        return self._simplified_price
+    def general_simplified_price(self) -> float:
+        return self._general_simplified_price
+
+    @property
+    def spot_simplified_price(self) -> float:
+        return self._spot_simplified_price
 
     @property
     def emas(self) -> Tuple[float, float]:
@@ -94,11 +98,6 @@ class DailyIndicator:
     @property
     def cci(self) -> float:
         return self._cci
-
-
-class PriceType(Enum):
-    ACTUAL = 0
-    SIMPLIFIED = 1
 
 
 class DailyPrice:
@@ -126,14 +125,6 @@ class DailyPrice:
         self._scaled_rsi = scaled_rsi
         self._scaled_adx = scaled_adx
         self._scaled_cci = scaled_cci
-
-    def get_price(self, price_type: PriceType) -> float:
-        if price_type == PriceType.ACTUAL:
-            return self.actual_price
-        elif price_type == PriceType.SIMPLIFIED:
-            return self.simplified_price
-        else:
-            raise NotImplementedError
 
     @property
     def date(self) -> datetime.date:
@@ -284,10 +275,9 @@ class DailyAsset(ABC):
             strict=True,
         ):
             self.__indicators.append(DailyIndicator(
-                candle.date,
-                actual_close, simplified_close,
-                (fast_ema, slow_ema),
-                rsi, adx, cci,
+                candle.date, actual_close, simplified_close,
+                # Indicators near the end date will be recalculated each time historical data is retrieved
+                simplified_close, (fast_ema, slow_ema), rsi, adx, cci,
             ))
 
     # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
@@ -316,9 +306,9 @@ class DailyAsset(ABC):
             prices.append(DailyPrice(
                 indicators[i].date,
                 indicators[i].actual_price,
-                indicators[i].simplified_price,
+                indicators[i].general_simplified_price,
                 # Features
-                indicators[i].simplified_price / indicators[i - self.__DELTA_DISTANCE].simplified_price - 1,
+                indicators[i].spot_simplified_price / indicators[i - self.__DELTA_DISTANCE].spot_simplified_price - 1,
                 indicators[i].emas[0] / indicators[i].emas[1] - 1,
                 indicators[i].rsi / 100,  # RSI range between 0 and 100
                 indicators[i].adx / 100,  # ADX range between 0 and 100
@@ -404,11 +394,9 @@ class DailyAsset(ABC):
                 _calc_ema(simplified_end_close, emas[1], self.__EMA_WINDOW_SLOW),
             )
             end_indicators.append(DailyIndicator(
-                indicator.date,
-                indicator.actual_price, simplified_end_close,
-                emas,
+                indicator.date, indicator.actual_price, indicator.general_simplified_price,
                 # TODO: Calculate other indicators
-                0, 0, 0,
+                simplified_end_close, emas, 0, 0, 0,
             ))
         # There are cases where the start date index appears after the index from which we start recalculating
         indicators = self.__indicators[start_date_index:recalc_start_index + 1] \

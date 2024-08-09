@@ -1,5 +1,4 @@
 import datetime
-import logging
 from enum import Enum
 from typing import Any, Dict, List, Optional, SupportsFloat, Tuple
 
@@ -11,7 +10,7 @@ from matplotlib.axes import Axes
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3 import DQN
 
-from ..asset.base import DailyAsset, DailyPrice, PriceType
+from ..asset.base import DailyAsset, DailyPrice
 from .asset_pool import AssetPool
 
 
@@ -43,12 +42,12 @@ class PositionType(Enum):
 class Position:
     _date: datetime.date
     _position_type: PositionType
-    _entry_price: float
+    _entry_price: DailyPrice
     _amount: float
 
     def __init__(
         self,
-        date: datetime.date, position_type: PositionType, entry_price: float, amount: float,
+        date: datetime.date, position_type: PositionType, entry_price: DailyPrice, amount: float,
     ) -> None:
         self._date = date
         self._position_type = position_type
@@ -64,12 +63,17 @@ class Position:
         return self._position_type
 
     @property
-    def entry_price(self) -> float:
+    def entry_price(self) -> DailyPrice:
         return self._entry_price
 
     @property
     def amount(self) -> float:
         return self._amount
+
+
+class PriceType(Enum):
+    ACTUAL = 0
+    SIMPLIFIED = 1
 
 
 # Doc:
@@ -215,7 +219,7 @@ class TradingPlatform(gym.Env):
             self._positions.append(Position(
                 self._prices[-1].date,
                 PositionType(action),
-                self._last_price,
+                self._prices[-1],
                 self._POSITION_AMOUNT_UNIT if self.using_fixed_position_amount else self._prices[-1].actual_price,
             ))
         # Recalculate position's net by first reverting net of the current date.
@@ -396,17 +400,15 @@ class TradingPlatform(gym.Env):
                 action = np.random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL])
             obs, _, terminated, truncated, info = self.step(action.value)
             is_end_of_date = info["is_end_of_date"]
-            logging.debug("%s %f %f", self._prices[-1].date, self._prices[-1].actual_price, self._extra_info.earning)
             if is_end_of_date or (stopping_when_done and (terminated or truncated)):
                 break
             step += 1
         rendered = self.render() if rendering else None
         # Calculate the earning
-        calculated_earning, price_change, wl_rate = calc_earning(
+        calculated_earning, price_change, wl_rate = _calc_earning(
             self._positions, self._prices[-1],
             self.position_net_price_type,
         )
-        logging.debug("%s %f", self._prices[-1].date, self._prices[-1].actual_price)
         # Platform earning and self-calculated earning should be equal
         platform_earning = self._extra_info.earning
         return (
@@ -424,12 +426,8 @@ class TradingPlatform(gym.Env):
         return self._asset_pool.get_asset(self._asset_symbol)
 
     @property
-    def _last_price(self) -> float:
-        return self._prices[-1].get_price(self.position_net_price_type)
-
-    @property
     def _last_position_net_ratio(self) -> float:
-        return calc_position_net_ratio(self._positions[-1], self._last_price)
+        return _calc_position_net_ratio(self._positions[-1], self._prices[-1], self.position_net_price_type)
 
     # Should be called right after updating `self._date_index` to the newest date
     def _retrieve_prices(self):
@@ -458,13 +456,23 @@ class TradingPlatform(gym.Env):
         }
 
 
-def calc_position_net_ratio(position: Position, price: float) -> float:
-    return position.position_type.sign * (price / position.entry_price - 1)
+def _calc_position_net_ratio(position: Position, price: DailyPrice, price_type: PriceType) -> float:
+    entry_price: float
+    market_price: float
+    if price_type == PriceType.ACTUAL:
+        entry_price = position.entry_price.actual_price
+        market_price = price.actual_price
+    elif price_type == PriceType.SIMPLIFIED:
+        entry_price = position.entry_price.simplified_price
+        market_price = price.simplified_price
+    else:
+        raise NotImplementedError
+    return position.position_type.sign * (market_price / entry_price - 1)
 
 
-def calc_earning(
+def _calc_earning(
     positions: List[Position], final_price: DailyPrice,
-    position_net_price_type: PriceType,
+    price_type: PriceType,
 ) -> Tuple[float, float, float]:
     if len(positions) < 1 or positions[-1].date > final_price.date:
         return (0, 0, 0)
@@ -474,19 +482,17 @@ def calc_earning(
     # Earning of closed positions (excluding the last position, as it is probably not yet closed)
     for prev_position, cur_position in zip(positions[:-1], positions[1:]):
         # Position net
-        position_net_ratio = calc_position_net_ratio(prev_position, cur_position.entry_price)
+        position_net_ratio = _calc_position_net_ratio(prev_position, cur_position.entry_price, price_type)
         position_net_ratios.append(position_net_ratio)
-        price_change_ratios.append(cur_position.entry_price / prev_position.entry_price - 1)
+        price_change_ratios.append(cur_position.entry_price.actual_price / prev_position.entry_price.actual_price - 1)
         earning += prev_position.amount * position_net_ratio
-        logging.debug("%s %f %s", prev_position.date, prev_position.entry_price, prev_position.position_type)
     # Earning of the last position
-    last_position_net_ratio = calc_position_net_ratio(positions[-1], final_price.get_price(position_net_price_type))
+    last_position_net_ratio = _calc_position_net_ratio(positions[-1], final_price, price_type)
     position_net_ratios.append(last_position_net_ratio)
-    price_change_ratios.append(final_price.actual_price / positions[-1].entry_price - 1)
+    price_change_ratios.append(final_price.actual_price / positions[-1].entry_price.actual_price - 1)
     earning += positions[-1].amount * last_position_net_ratio
-    logging.debug("%s %f %s", positions[-1].date, positions[-1].entry_price, positions[-1].position_type)
     # Price change equals a BUY position, hence `1` instead of `-1`
-    price_change = positions[0].amount * 1 * (final_price.actual_price / positions[0].entry_price - 1)
+    price_change = positions[0].amount * 1 * (final_price.actual_price / positions[0].entry_price.actual_price - 1)
     # Win-lose rate
     wl_rate = sum([
         # Position net ratios and price change ratios always have the same absolute value but differ in sign,

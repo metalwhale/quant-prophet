@@ -1,17 +1,13 @@
 import datetime
-import logging
 
 import numpy as np
 import pandas as pd
 from ta.trend import EMAIndicator
 
-from trainer.asset.base import DailyAsset, PriceType, detect_levels, simplify
+from trainer.asset.base import DailyAsset, detect_levels, simplify
 from trainer.env.asset_pool import AssetPool
-from trainer.env.trading_platform import TradingPlatform
+from trainer.env.trading_platform import PriceType, TradingPlatform
 from train import generate_zigzag_assets
-
-
-logging.getLogger().setLevel(logging.INFO)
 
 
 def test_earning_calculation() -> bool:
@@ -25,7 +21,6 @@ def test_earning_calculation() -> bool:
     for i in range(1000):
         if i % 100 == 0:
             print(i)
-        logging.debug("==========")
         env.position_net_price_type = np.random.choice([PriceType.ACTUAL, PriceType.SIMPLIFIED])
         env.using_fixed_position_amount = np.random.choice([True, False])
         _, (platform_earning, calculated_earning, *_), _ = env.trade(
@@ -59,11 +54,8 @@ def test_indicator_recalculation() -> bool:
         start_date_index = end_date_index - (HISTORICAL_DAYS_NUM - 1)
         fast_emas = fast_emas[start_date_index:]
         slow_emas = slow_emas[start_date_index:]
-        for i, (price, fast_ema, slow_ema) in enumerate(zip(prices, fast_emas, slow_emas, strict=True)):
-            if (
-                (i == len(prices) - 1 and abs(price.actual_price - price.simplified_price) >= EPSILON)
-                or (abs(price.ema_diff_ratio - (fast_ema / slow_ema - 1)) >= EPSILON)
-            ):
+        for price, fast_ema, slow_ema in zip(prices, fast_emas, slow_emas, strict=True):
+            if abs(price.ema_diff_ratio - (fast_ema / slow_ema - 1)) >= EPSILON:
                 return False
         end_date += datetime.timedelta(days=1)
     return True
