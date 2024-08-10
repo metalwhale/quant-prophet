@@ -68,7 +68,7 @@ class FullEvalCallback(BaseCallback):
             env.set_mode(False)  # Just in case
             earning_discrepancy_sum = 0.0
             wl_rate_sum = 0.0
-            for symbol in env.asset_pool.primary_symbols:
+            for symbol in env.asset_pool.symbols:
                 os.makedirs(self._output_path / symbol, exist_ok=True)
                 env.favorite_symbols = [symbol]
                 (
@@ -115,12 +115,12 @@ class FullEvalCallback(BaseCallback):
                 earning_discrepancy_sum += earning_discrepancy
                 wl_rate_sum += wl_rate
             avg_result |= {
-                f"{env_name}_earning_discrepancy": earning_discrepancy_sum / len(env.asset_pool.primary_symbols),
-                f"{env_name}_wl_rate": wl_rate_sum / len(env.asset_pool.primary_symbols),
+                f"{env_name}_earning_discrepancy": earning_discrepancy_sum / len(env.asset_pool.symbols),
+                f"{env_name}_wl_rate": wl_rate_sum / len(env.asset_pool.symbols),
             }
             env.favorite_symbols = None
         # Save overview results
-        for symbol in set([s for e in self._envs.values() for s in e.asset_pool.primary_symbols]):
+        for symbol in set([s for e in self._envs.values() for s in e.asset_pool.symbols]):
             self.__save_overview_results(symbol, asset_results[symbol])
         self.__save_overview_results(None, avg_result)
 

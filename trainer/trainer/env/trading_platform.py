@@ -160,7 +160,6 @@ class TradingPlatform(gym.Env):
 
     # Constants, mainly used only for training
     _POSITION_AMOUNT_UNIT: float = 100.0
-    _ASSET_TYPE_WEIGHTS: Tuple[float, float] = [1.0, 0.0]  # (primary, secondary)
     _CLOSE_RANDOM_RADIUS: Optional[int] = 0
 
     def __init__(
@@ -194,16 +193,9 @@ class TradingPlatform(gym.Env):
         seed: int | None = None, options: dict[str, Any] | None = None,
     ) -> tuple[Dict[str, Any], dict[str, Any]]:
         super().reset(seed=seed, options=options)
-        preferring_secondary = (
-            self._randomizing and self._asset_pool.is_secondary_generatable
-            and np.random.choice([False, True], p=self._ASSET_TYPE_WEIGHTS)
-        )
-        if preferring_secondary:
-            self._asset_pool.renew_secondary_assets()
         self._asset_symbol, self._date_range = self._asset_pool.choose_asset_date(
             favorite_symbols=self.favorite_symbols,
             randomizing_start=self._randomizing,
-            preferring_secondary=preferring_secondary,
         )
         self._asset.prepare_indicators(close_random_radius=self._CLOSE_RANDOM_RADIUS if self._randomizing else None)
         self._date_index = 0
