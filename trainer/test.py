@@ -33,6 +33,7 @@ def test_earning_calculation() -> bool:
 
 
 def test_indicator_recalculation() -> bool:
+    DailyAsset._DailyAsset__USING_SIMPLIFIED_PRICE_FOR_INDICATORS = True
     PUBLISHED_DATE_STR = "2020-01-01"
     HISTORICAL_DAYS_NUM = 90
     EPSILON = 1e-14

@@ -173,6 +173,7 @@ class DailyAsset(ABC):
     __indicators: List[DailyIndicator]
     __levels: Optional[OrderedDict[int, LevelType]]
 
+    __USING_SIMPLIFIED_PRICE_FOR_INDICATORS = False
     # TODO: Choose better values
     __MIN_PRICE_CHANGE_RATIO_MAGNITUDE: Optional[Union[float, Tuple[float, float]]] = None
     # NOTE: When adding a new hyperparameter to calculate historical data, remember to modify `calc_buffer_days_num` method
@@ -249,29 +250,39 @@ class DailyAsset(ABC):
             lows.append(low)
             closes.append(close)
         # Simplify the prices
-        simplified_highs = highs
-        simplified_lows = lows
-        simplified_closes = closes
+        highs = pd.Series(highs)
+        lows = pd.Series(lows)
+        closes = pd.Series(closes)
+        simplified_closes: pd.Series
         if self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE is not None:
             self.__levels = detect_levels(closes, self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE)
-            simplified_highs = simplify(highs, levels=self.__levels)
-            simplified_lows = simplify(lows, levels=self.__levels)
-            simplified_closes = simplify(closes, levels=self.__levels)
+            simplified_closes = pd.Series(simplify(closes, levels=self.__levels))
         else:
             self.__levels = None
-        simplified_highs = pd.Series(simplified_highs)
-        simplified_lows = pd.Series(simplified_lows)
-        simplified_closes = pd.Series(simplified_closes)
+            simplified_closes = closes.copy()
         # Calculate indicators
+        fast_emas: pd.Series
+        slow_emas: pd.Series
+        rsis: pd.Series
+        adxs: pd.Series
+        ccis: pd.Series
+        if self.__USING_SIMPLIFIED_PRICE_FOR_INDICATORS and self.__levels is not None:
+            simplified_highs = pd.Series(simplify(highs, levels=self.__levels))
+            simplified_lows = pd.Series(simplify(lows, levels=self.__levels))
+            fast_emas = EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_FAST).ema_indicator()
+            slow_emas = EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_SLOW).ema_indicator()
+            rsis = RSIIndicator(simplified_closes, window=self.__RSI_WINDOW).rsi()
+            adxs = ADXIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__ADX_WINDOW).adx()
+            ccis = CCIIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__CCI_WINDOW).cci()
+        else:
+            fast_emas = EMAIndicator(closes, window=self.__EMA_WINDOW_FAST).ema_indicator()
+            slow_emas = EMAIndicator(closes, window=self.__EMA_WINDOW_SLOW).ema_indicator()
+            rsis = RSIIndicator(closes, window=self.__RSI_WINDOW).rsi()
+            adxs = ADXIndicator(highs, lows, closes, window=self.__ADX_WINDOW).adx()
+            ccis = CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci()
         for (candle, actual_close, simplified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
-            self.__candles,
-            pd.Series(closes),
-            simplified_closes,
-            EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_FAST).ema_indicator(),
-            EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_SLOW).ema_indicator(),
-            RSIIndicator(simplified_closes, window=self.__RSI_WINDOW).rsi(),
-            ADXIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__ADX_WINDOW).adx(),
-            CCIIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__CCI_WINDOW).cci(),
+            self.__candles, closes, simplified_closes,
+            fast_emas, slow_emas, rsis, adxs, ccis,
             strict=True,
         ):
             self.__indicators.append(DailyIndicator(
@@ -297,10 +308,10 @@ class DailyAsset(ABC):
         # Recalculate the indicators
         start_date_index = end_date_index - (days_num - 1)
         indicators: List[DailyIndicator]
-        if self.__levels is None:
-            indicators = self.__indicators[start_date_index:end_date_index + 1]
-        else:
+        if self.__USING_SIMPLIFIED_PRICE_FOR_INDICATORS and self.__levels is not None:
             indicators = self.__recalc_indicators(start_date_index, end_date_index)
+        else:
+            indicators = self.__indicators[start_date_index:end_date_index + 1]
         # Historical prices for the days before `end_date`
         for i in range(len(indicators)):
             prices.append(DailyPrice(
@@ -537,7 +548,7 @@ def simplify(prices: List[float], levels: Optional[OrderedDict[int, LevelType]] 
             simplified_price = prices[index] \
                 + (prices[next_index] - prices[index]) * (i - index) / (next_index - index)
             simplified_prices.append(simplified_price)
-    simplified_prices.append(prices[-1])
+    simplified_prices.append(prices[len(prices) - 1])
     return simplified_prices
 
 
