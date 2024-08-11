@@ -146,6 +146,9 @@ class TradingPlatform(gym.Env):
     _asset_pool: AssetPool
     _historical_days_num: int  # Number of days used for retrieving historical data
 
+    # Hyperparameters
+    _short_period_penalty: float = 0.0
+
     # State components
     # Episode-level, only changed if we reset to begin a new episode
     _asset_symbol: str  # Symbol of the current asset
@@ -184,6 +187,7 @@ class TradingPlatform(gym.Env):
             "historical_scaled_rsis": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
             "historical_scaled_adxs": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
             "historical_scaled_ccis": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            "last_position_holding_days_num": gym.spaces.Box(0, np.inf, shape=(1,)),
             # Position types have the same values as action space.
             "position_type": gym.spaces.Discrete(len(PositionType)),
         })
@@ -228,6 +232,9 @@ class TradingPlatform(gym.Env):
         # Note that this doesn't mean it's not good to include the earning of BUY positions for reward.
         if self._positions[-1].position_type == PositionType.SELL:
             reward += earning
+            # Penalize if the position is held for too short a period
+            reward += self._positions[-1].amount \
+                * -self._short_period_penalty / (self._prices[-1].date - self._positions[-1].date).days
         # Read more about termination and truncation at:
         # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/handling_time_limits/
         # - https://farama.org/Gymnasium-Terminated-Truncated-Step-API
@@ -436,6 +443,12 @@ class TradingPlatform(gym.Env):
         self._prices = self._asset.retrieve_historical_prices(date, self._historical_days_num)
 
     def _obtain_observation(self) -> Dict[str, Any]:
+        last_position_holding_days_num: int
+        if len(self._positions) > 0:
+            # TODO: Choose a better scaling factor
+            last_position_holding_days_num = (self._prices[-1].date - self._positions[-1].date).days / 20
+        else:
+            last_position_holding_days_num = 0
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_price_delta_ratios": np.array([p.price_delta_ratio for p in self._prices]),
@@ -443,6 +456,7 @@ class TradingPlatform(gym.Env):
             "historical_scaled_rsis": np.array([p.scaled_rsi for p in self._prices]),
             "historical_scaled_adxs": np.array([p.scaled_adx for p in self._prices]),
             "historical_scaled_ccis": np.array([p.scaled_cci for p in self._prices]),
+            "last_position_holding_days_num": np.array([last_position_holding_days_num]),
             "position_type": np.array([(
                 self._positions[-1].position_type if len(self._positions) > 0 else PositionType(
                     # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
