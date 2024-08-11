@@ -180,16 +180,14 @@ class TradingPlatform(gym.Env):
         # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
         self.action_space = gym.spaces.Discrete(len(PositionType) - 1)
         self.observation_space = gym.spaces.Dict({
-            # Suppose that delta and diff values (ratios) are greater than -1 and less than 1,
-            # meaning prices and other indicators never drop to 0 and never double from previous day.
             "historical_price_delta_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             "historical_ema_diff_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             "historical_scaled_rsis": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
             "historical_scaled_adxs": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
             "historical_scaled_ccis": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            "last_position_type": gym.spaces.Discrete(len(PositionType)),
+            "last_position_net_ratio": gym.spaces.Box(-1, 1, shape=(1,)),
             "last_position_holding_days_num": gym.spaces.Box(0, np.inf, shape=(1,)),
-            # Position types have the same values as action space.
-            "position_type": gym.spaces.Discrete(len(PositionType)),
         })
 
     def reset(
@@ -443,12 +441,17 @@ class TradingPlatform(gym.Env):
         self._prices = self._asset.retrieve_historical_prices(date, self._historical_days_num)
 
     def _obtain_observation(self) -> Dict[str, Any]:
-        last_position_holding_days_num: int
+        last_position_type: PositionType = PositionType(
+            # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
+            self.np_random.choice([PositionType.BUY, PositionType.SELL])
+        )
+        last_position_net_ratio: float = 0
+        last_position_holding_days_num: float = 0
         if len(self._positions) > 0:
+            last_position_type = self._positions[-1].position_type
+            last_position_net_ratio = self._last_position_net_ratio
             # TODO: Choose a better scaling factor
             last_position_holding_days_num = (self._prices[-1].date - self._positions[-1].date).days / 20
-        else:
-            last_position_holding_days_num = 0
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_price_delta_ratios": np.array([p.price_delta_ratio for p in self._prices]),
@@ -456,13 +459,9 @@ class TradingPlatform(gym.Env):
             "historical_scaled_rsis": np.array([p.scaled_rsi for p in self._prices]),
             "historical_scaled_adxs": np.array([p.scaled_adx for p in self._prices]),
             "historical_scaled_ccis": np.array([p.scaled_cci for p in self._prices]),
+            "last_position_type": np.array([last_position_type.value], dtype=int),
+            "last_position_net_ratio": np.array([last_position_net_ratio]),
             "last_position_holding_days_num": np.array([last_position_holding_days_num]),
-            "position_type": np.array([(
-                self._positions[-1].position_type if len(self._positions) > 0 else PositionType(
-                    # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
-                    self.np_random.choice([PositionType.BUY, PositionType.SELL])
-                )
-            ).value], dtype=int),
         }
 
 
