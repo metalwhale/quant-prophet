@@ -226,25 +226,38 @@ class DailyAsset(ABC):
             date_range.append(date)
         return date_range
 
-    def prepare_indicators(self, close_random_radius: Optional[int] = None):
+    def prepare_indicators(self, random_radius: Optional[int] = None):
         self.__indicators = []
         highs = []
         lows = []
         closes = []
         for i, candle in enumerate(self.__candles):
-            low = candle.low
-            high = candle.high
-            close = candle.close
-            if close_random_radius is not None:
-                j = max(i - close_random_radius, 0)
-                low = self.__candles[j].low
-                high = self.__candles[j].high
+            low: float
+            high: float
+            close: float
+            if random_radius is None:
+                low = candle.low
+                high = candle.high
+                close = candle.close
+            else:
+                j = max(i - random_radius, 0)
+                min_low = self.__candles[j].low
+                max_low = min_low
+                min_high = self.__candles[j].high
+                max_high = min_high
                 # Iterate through the neighboring candles within a specific radius,
                 # where a `radius = 0` means using only the current candle (no neighbors).
-                while j < min(i + close_random_radius, len(self.__candles) - 1):
+                while j < min(i + random_radius, len(self.__candles) - 1):
                     j += 1
-                    low = min(low, self.__candles[j].low)
-                    high = max(high, self.__candles[j].high)
+                    min_low = min(min_low, self.__candles[j].low)
+                    max_low = max(max_low, self.__candles[j].low)
+                    min_high = min(min_high, self.__candles[j].high)
+                    max_high = max(max_high, self.__candles[j].high)
+                # TODO: Find a better way to handle cases where the max low is greater than the min high
+                if max_low > min_high:
+                    max_low, min_high = min_high, max_low
+                low = np.random.uniform(min_low, max_low)
+                high = np.random.uniform(min_high, max_high)
                 close = np.random.uniform(low, high)
             highs.append(high)
             lows.append(low)

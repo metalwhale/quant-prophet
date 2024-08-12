@@ -163,7 +163,7 @@ class TradingPlatform(gym.Env):
 
     # Constants, mainly used only for training
     _POSITION_AMOUNT_UNIT: float = 100.0
-    _CLOSE_RANDOM_RADIUS: Optional[int] = 0
+    _RANDOM_RADIUS: Optional[int] = 0
 
     def __init__(
         self,
@@ -199,7 +199,7 @@ class TradingPlatform(gym.Env):
             favorite_symbols=self.favorite_symbols,
             randomizing_start=self._randomizing,
         )
-        self._asset.prepare_indicators(close_random_radius=self._CLOSE_RANDOM_RADIUS if self._randomizing else None)
+        self._asset.prepare_indicators(random_radius=self._RANDOM_RADIUS if self._randomizing else None)
         self._date_index = 0
         self._retrieve_prices()
         self._positions = []
