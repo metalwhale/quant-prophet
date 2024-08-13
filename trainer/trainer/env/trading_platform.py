@@ -147,7 +147,7 @@ class TradingPlatform(gym.Env):
     _historical_days_num: int  # Number of days used for retrieving historical data
 
     # Hyperparameters
-    _short_period_penalty: float = 0.0
+    _short_period_penalty: Optional[Tuple[float, float]] = [0.0, 0.0]  # Penalty and discount factor
 
     # State components
     # Episode-level, only changed if we reset to begin a new episode
@@ -230,9 +230,11 @@ class TradingPlatform(gym.Env):
         # Note that this doesn't mean it's not good to include the earning of BUY positions for reward.
         if self._positions[-1].position_type == PositionType.SELL:
             reward += earning
-            # Penalize if the position is held for too short a period
+        # Penalize if the position is held for too short a period
+        if self._short_period_penalty is not None:
+            penalty, discount_factor = self._short_period_penalty
             reward += self._positions[-1].amount \
-                * -self._short_period_penalty / (self._prices[-1].date - self._positions[-1].date).days
+                * -penalty * (discount_factor ** (self._prices[-1].date - self._positions[-1].date).days)
         # Read more about termination and truncation at:
         # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/handling_time_limits/
         # - https://farama.org/Gymnasium-Terminated-Truncated-Step-API
