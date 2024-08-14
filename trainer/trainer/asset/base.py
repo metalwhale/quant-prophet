@@ -176,13 +176,15 @@ class DailyAsset(ABC):
     __USING_SIMPLIFIED_PRICE_FOR_INDICATORS = False
     # TODO: Choose better values
     __MIN_PRICE_CHANGE_RATIO_MAGNITUDE: Optional[Union[float, Tuple[float, float]]] = None
-    # NOTE: When adding a new hyperparameter to calculate historical data, remember to modify `calc_buffer_days_num` method
+    # NOTE: When adding a new hyperparameter to calculate historical and futuristic data,
+    # remember to modify `calc_buffer_days_num` method
     __DELTA_DISTANCE = 1
     __EMA_WINDOW_FAST = 5
     __EMA_WINDOW_SLOW = 20
     __RSI_WINDOW = 14
     __ADX_WINDOW = 14
     __CCI_WINDOW = 20
+    __PROJECTION_DISTANCE = 0
 
     __DATE_FORMAT = "%Y-%m-%d"
 
@@ -194,16 +196,17 @@ class DailyAsset(ABC):
     # - All dates must be equal to or greater than `min_date`
     # - Skip the first few days which are reserved for calculating historical data
     # - All dates must be equal to or smaller than `max_date`
+    # - Skip the last few days which are reserved for calculating futuristic data
     def find_matched_tradable_date_range(
         self,
         historical_days_num: int,
         min_date: Optional[datetime.date] = None, max_date: Optional[datetime.date] = None,
         excluding_historical: bool = True,
     ) -> List[datetime.date]:
-        historical_buffer_days_num = self.calc_buffer_days_num()
+        historical_buffer_days_num, futuristic_buffer_days_num = self.calc_buffer_days_num()
         if (
             (min_date is not None and max_date is not None and min_date > max_date)
-            or len(self.__candles) < historical_days_num + historical_buffer_days_num
+            or len(self.__candles) < historical_days_num + historical_buffer_days_num + futuristic_buffer_days_num
         ):
             raise ValueError
         date_range: List[datetime.date] = []
@@ -222,6 +225,8 @@ class DailyAsset(ABC):
             ):
                 continue
             if max_date is not None and date > max_date:
+                break
+            if i > (len(self.__candles) - 1) - futuristic_buffer_days_num:
                 break
             date_range.append(date)
         return date_range
@@ -293,6 +298,13 @@ class DailyAsset(ABC):
             rsis = RSIIndicator(closes, window=self.__RSI_WINDOW).rsi()
             adxs = ADXIndicator(highs, lows, closes, window=self.__ADX_WINDOW).adx()
             ccis = CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci()
+        # Project the simplified closes into the future
+        for i in range(len(simplified_closes)):
+            if i + self.__PROJECTION_DISTANCE <= len(simplified_closes) - 1:
+                simplified_closes[i] = simplified_closes[i + self.__PROJECTION_DISTANCE]
+            else:
+                simplified_closes[i] = float("nan")
+        # Store the indicators
         for (candle, actual_close, simplified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
             self.__candles, closes, simplified_closes,
             fast_emas, slow_emas, rsis, adxs, ccis,
@@ -308,13 +320,15 @@ class DailyAsset(ABC):
     # The actual price used is usually the close price, except for end date,
     # where there is an option to be randomly chosen within the range of low price to high price.
     def retrieve_historical_prices(self, end_date: datetime.date, days_num: int) -> List[DailyPrice]:
-        historical_buffer_days_num = self.calc_buffer_days_num()
+        historical_buffer_days_num, futuristic_buffer_days_num = self.calc_buffer_days_num()
         end_date_index = self.__get_date_index(end_date)
         if (
             end_date_index is None
             # We need `days_num` days for historical data (including the end date),
             # plus a few buffer days to calculate price delta ratios and indicators for the start day.
             or end_date_index < (days_num - 1) + historical_buffer_days_num
+            # We also need a few buffer days for futuristic data
+            or end_date_index > (len(self.__indicators) - 1) - futuristic_buffer_days_num
         ):
             raise ValueError
         prices: List[DailyPrice] = []
@@ -341,16 +355,17 @@ class DailyAsset(ABC):
         return prices
 
     @classmethod
-    def calc_buffer_days_num(cls) -> int:
+    def calc_buffer_days_num(cls) -> Tuple[int, int]:
         # TODO: Check if these buffers are properly selected
         historical_buffer_days_num = max(
             cls.__DELTA_DISTANCE,  # For price delta ratios
-            max(cls.__EMA_WINDOW_FAST - 1, cls.__EMA_WINDOW_SLOW - 1),  # For EMA diff ratios' first `nan`s
-            cls.__RSI_WINDOW - 1,  # For RSI's first `nan`s
-            cls.__ADX_WINDOW * 2 - 1,  # For ADX's first `0`s
-            cls.__CCI_WINDOW - 1,  # For CCI's first `nan`s
+            max(cls.__EMA_WINDOW_FAST - 1, cls.__EMA_WINDOW_SLOW - 1),  # For first `nan`s of EMA diff ratios
+            cls.__RSI_WINDOW - 1,  # For first `nan`s of RSIs
+            cls.__ADX_WINDOW * 2 - 1,  # For first `0`s of ADXs
+            cls.__CCI_WINDOW - 1,  # For first `nan`s of CCIs
         )
-        return historical_buffer_days_num
+        futuristic_buffer_days_num = cls.__PROJECTION_DISTANCE  # For last `nan`s of general simplified closes
+        return historical_buffer_days_num, futuristic_buffer_days_num
 
     @property
     def symbol(self) -> str:

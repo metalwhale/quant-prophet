@@ -37,11 +37,13 @@ def test_indicator_recalculation() -> bool:
     PUBLISHED_DATE_STR = "2020-01-01"
     HISTORICAL_DAYS_NUM = 90
     EPSILON = 1e-14
-    today = datetime.datetime.today().date()
     end_date = datetime.datetime.strptime("2022-01-01", "%Y-%m-%d").date()
-    while end_date < today:  # Zigzag asset fetches the candles up to yesterday. Ref: `Zigzag._fetch_candles` method.
+    while True:
         DailyAsset._DailyAsset__MIN_PRICE_CHANGE_RATIO_MAGNITUDE = np.random.uniform(0, 1)
         asset = generate_zigzag_assets(PUBLISHED_DATE_STR, 1)[0]
+        # Don't set `max_date` because we need to check up to the last tradable date
+        if end_date > asset.find_matched_tradable_date_range(HISTORICAL_DAYS_NUM)[-1]:
+            break
         asset.prepare_indicators()
         prices = asset.retrieve_historical_prices(end_date, HISTORICAL_DAYS_NUM,)
         # Manually calculate indicators
