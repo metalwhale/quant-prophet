@@ -16,7 +16,7 @@ def test_earning_calculation() -> bool:
     for i in range(1000):
         if i % 100 == 0:
             print(i)
-        env._position_net_price_type = np.random.choice([PriceType.ACTUAL, PriceType.SIMPLIFIED])
+        env._position_net_price_type = np.random.choice([PriceType.ACTUAL, PriceType.MODIFIED])
         env._position_amount_type = np.random.choice([AmountType.UNIT, AmountType.SPOT])
         _, (platform_earning, calculated_earning, *_), _ = env.trade(
             max_step=np.random.randint(10, 120), rendering=False,

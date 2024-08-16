@@ -73,7 +73,7 @@ class Position:
 
 class PriceType(Enum):
     ACTUAL = 0
-    SIMPLIFIED = 1
+    MODIFIED = 1
 
 
 class AmountType(Enum):
@@ -319,7 +319,7 @@ class TradingPlatform(gym.Env):
                 # Move to next position
                 position_index = next_position_index
                 date_prices = [date_price]
-        axes.plot(dates, [p.simplified_price if p.date in dates else None for p in prices], alpha=0.5)
+        axes.plot(dates, [p.modified_price if p.date in dates else None for p in prices], alpha=0.5)
         # Plot features
         for i, feature in enumerate(FEATURES):
             is_ratio = "ratio" in feature
@@ -417,7 +417,7 @@ class TradingPlatform(gym.Env):
 
     def set_mode(self, is_training: bool):
         self._randomizing = is_training
-        self._position_net_price_type = PriceType.SIMPLIFIED if is_training else PriceType.ACTUAL
+        self._position_net_price_type = PriceType.MODIFIED if is_training else PriceType.ACTUAL
         self._position_amount_type = AmountType.UNIT if is_training else AmountType.SPOT
 
     @property
@@ -473,9 +473,9 @@ def _calc_position_net_ratio(position: Position, price: DailyPrice, price_type: 
     if price_type == PriceType.ACTUAL:
         entry_price = position.entry_price.actual_price
         market_price = price.actual_price
-    elif price_type == PriceType.SIMPLIFIED:
-        entry_price = position.entry_price.simplified_price
-        market_price = price.simplified_price
+    elif price_type == PriceType.MODIFIED:
+        entry_price = position.entry_price.modified_price
+        market_price = price.modified_price
     else:
         raise NotImplementedError
     return position.position_type.sign * (market_price / entry_price - 1)

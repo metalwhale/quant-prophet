@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+from scipy.interpolate import BPoly
 from ta.momentum import RSIIndicator
 from ta.trend import ADXIndicator, CCIIndicator, EMAIndicator
 
@@ -46,7 +47,7 @@ class DailyCandle:
 class DailyIndicator:
     _date: datetime.date
     _actual_price: float
-    _simplified_price: float
+    _modified_price: float
     _emas: Tuple[float, float]
     _rsi: float
     _adx: float
@@ -54,12 +55,12 @@ class DailyIndicator:
 
     def __init__(
         self,
-        date: datetime.date, actual_price: float, simplified_price: float,
+        date: datetime.date, actual_price: float, modified_price: float,
         emas: Tuple[float, float], rsi: float, adx: float, cci: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
-        self._simplified_price = simplified_price
+        self._modified_price = modified_price
         self._emas = emas
         self._rsi = rsi
         self._adx = adx
@@ -74,8 +75,8 @@ class DailyIndicator:
         return self._actual_price
 
     @property
-    def simplified_price(self) -> float:
-        return self._simplified_price
+    def modified_price(self) -> float:
+        return self._modified_price
 
     @property
     def emas(self) -> Tuple[float, float]:
@@ -97,7 +98,7 @@ class DailyIndicator:
 class DailyPrice:
     _date: datetime.date
     _actual_price: float
-    _simplified_price: float
+    _modified_price: float
     _price_delta_ratio: float  # Change in price expressed as a ratio compared to the previous day
     _ema_diff_ratio: float  # Difference in ratio between fast EMA and slow EMA
     _scaled_rsi: float
@@ -107,13 +108,13 @@ class DailyPrice:
     def __init__(
         self,
         date: datetime.date,
-        actual_price: float, simplified_price: float,
+        actual_price: float, modified_price: float,
         price_delta_ratio: float, ema_diff_ratio: float,
         scaled_rsi: float, scaled_adx: float, scaled_cci: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
-        self._simplified_price = simplified_price
+        self._modified_price = modified_price
         self._price_delta_ratio = price_delta_ratio
         self._ema_diff_ratio = ema_diff_ratio
         self._scaled_rsi = scaled_rsi
@@ -129,8 +130,8 @@ class DailyPrice:
         return self._actual_price
 
     @property
-    def simplified_price(self) -> float:
-        return self._simplified_price
+    def modified_price(self) -> float:
+        return self._modified_price
 
     @property
     def price_delta_ratio(self) -> float:
@@ -259,36 +260,36 @@ class DailyAsset(ABC):
             highs.append(high)
             lows.append(low)
             closes.append(close)
-        # Simplify the prices
+        # Modify the prices
         highs = pd.Series(highs)
         lows = pd.Series(lows)
         closes = pd.Series(closes)
-        simplified_closes: pd.Series
+        modified_closes: pd.Series
         if self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE is not None:
             levels = _detect_levels(closes, self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE)
-            simplified_closes = pd.Series(simplify(closes, levels=levels))
+            modified_closes = pd.Series(_smooth(closes, levels=levels))
         else:
-            simplified_closes = closes.copy()
+            modified_closes = closes.copy()
         # Calculate indicators
         fast_emas = EMAIndicator(closes, window=self.__EMA_WINDOW_FAST).ema_indicator()
         slow_emas = EMAIndicator(closes, window=self.__EMA_WINDOW_SLOW).ema_indicator()
         rsis = RSIIndicator(closes, window=self.__RSI_WINDOW).rsi()
         adxs = ADXIndicator(highs, lows, closes, window=self.__ADX_WINDOW).adx()
         ccis = CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci()
-        # Project the simplified closes into the future
-        for i in range(len(simplified_closes)):
-            if i + self.__PROJECTION_DISTANCE <= len(simplified_closes) - 1:
-                simplified_closes[i] = simplified_closes[i + self.__PROJECTION_DISTANCE]
+        # Project the modified closes into the future
+        for i in range(len(modified_closes)):
+            if i + self.__PROJECTION_DISTANCE <= len(modified_closes) - 1:
+                modified_closes[i] = modified_closes[i + self.__PROJECTION_DISTANCE]
             else:
-                simplified_closes[i] = float("nan")
+                modified_closes[i] = float("nan")
         # Store the indicators
-        for (candle, actual_close, simplified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
-            self.__candles, closes, simplified_closes,
+        for (candle, actual_close, modified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
+            self.__candles, closes, modified_closes,
             fast_emas, slow_emas, rsis, adxs, ccis,
             strict=True,
         ):
             self.__indicators.append(DailyIndicator(
-                candle.date, actual_close, simplified_close,
+                candle.date, actual_close, modified_close,
                 # Indicators near the end date will be recalculated each time historical data is retrieved
                 (fast_ema, slow_ema), rsi, adx, cci,
             ))
@@ -316,7 +317,7 @@ class DailyAsset(ABC):
             prices.append(DailyPrice(
                 indicators[i].date,
                 indicators[i].actual_price,
-                indicators[i].simplified_price,
+                indicators[i].modified_price,
                 # Features
                 indicators[i].actual_price / indicators[i - self.__DELTA_DISTANCE].actual_price - 1,
                 indicators[i].emas[0] / indicators[i].emas[1] - 1,
@@ -336,7 +337,7 @@ class DailyAsset(ABC):
             cls.__ADX_WINDOW * 2 - 1,  # For first `0`s of ADXs
             cls.__CCI_WINDOW - 1,  # For first `nan`s of CCIs
         )
-        futuristic_buffer_days_num = cls.__PROJECTION_DISTANCE  # For last `nan`s of simplified closes
+        futuristic_buffer_days_num = cls.__PROJECTION_DISTANCE  # For last `nan`s of modified closes
         return historical_buffer_days_num, futuristic_buffer_days_num
 
     @property
@@ -480,23 +481,10 @@ def _detect_levels(
     return levels
 
 
-def simplify(prices: List[float], levels: Optional[OrderedDict[int, LevelType]] = None) -> List[float]:
+def _smooth(prices: List[float], levels: Optional[OrderedDict[int, LevelType]] = None) -> np.ndarray:
     if levels is None:
         return prices
-    level_indices = list(levels.keys())
-    # Since levels act as "anchors" for us to "stretch the prices into a straight line" between them,
-    # we need to treat the first and last prices like other levels, otherwise we won't have any "anchors"
-    # to simplify the prices after the first price and before the last price.
-    if len(level_indices) == 0 or level_indices[0] != 0:
-        level_indices.insert(0, 0)
-    if len(level_indices) == 0 or level_indices[-1] != len(prices) - 1:
-        level_indices.append(len(prices) - 1)
-    simplified_prices: List[float] = []
-    for index, next_index in zip(level_indices[:len(level_indices) - 1], level_indices[1:]):
-        for i in range(index, next_index):
-            # "Stretch" the prices
-            simplified_price = prices[index] \
-                + (prices[next_index] - prices[index]) * (i - index) / (next_index - index)
-            simplified_prices.append(simplified_price)
-    simplified_prices.append(prices[len(prices) - 1])
-    return simplified_prices
+    # `0` means setting the derivative to zero at each level
+    interpolate = BPoly.from_derivatives([i for i in levels], [[prices[i], 0] for i in levels])
+    smoothed_prices = interpolate(np.arange(len(prices)))
+    return smoothed_prices
