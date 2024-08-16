@@ -46,8 +46,7 @@ class DailyCandle:
 class DailyIndicator:
     _date: datetime.date
     _actual_price: float
-    _general_simplified_price: float
-    _spot_simplified_price: float
+    _simplified_price: float
     _emas: Tuple[float, float]
     _rsi: float
     _adx: float
@@ -55,13 +54,12 @@ class DailyIndicator:
 
     def __init__(
         self,
-        date: datetime.date, actual_price: float, general_simplified_price: float,
-        spot_simplified_price: float, emas: Tuple[float, float], rsi: float, adx: float, cci: float,
+        date: datetime.date, actual_price: float, simplified_price: float,
+        emas: Tuple[float, float], rsi: float, adx: float, cci: float,
     ) -> None:
         self._date = date
         self._actual_price = actual_price
-        self._general_simplified_price = general_simplified_price
-        self._spot_simplified_price = spot_simplified_price
+        self._simplified_price = simplified_price
         self._emas = emas
         self._rsi = rsi
         self._adx = adx
@@ -76,12 +74,8 @@ class DailyIndicator:
         return self._actual_price
 
     @property
-    def general_simplified_price(self) -> float:
-        return self._general_simplified_price
-
-    @property
-    def spot_simplified_price(self) -> float:
-        return self._spot_simplified_price
+    def simplified_price(self) -> float:
+        return self._simplified_price
 
     @property
     def emas(self) -> Tuple[float, float]:
@@ -171,9 +165,7 @@ class DailyAsset(ABC):
     __date_indices: Dict[str, int]
     # Recalculated when preparing indicator values
     __indicators: List[DailyIndicator]
-    __levels: Optional[OrderedDict[int, LevelType]]
 
-    __USING_SIMPLIFIED_PRICE_FOR_INDICATORS = False
     # TODO: Choose better values
     __MIN_PRICE_CHANGE_RATIO_MAGNITUDE: Optional[Union[float, Tuple[float, float]]] = None
     # NOTE: When adding a new hyperparameter to calculate historical and futuristic data,
@@ -273,31 +265,16 @@ class DailyAsset(ABC):
         closes = pd.Series(closes)
         simplified_closes: pd.Series
         if self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE is not None:
-            self.__levels = detect_levels(closes, self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE)
-            simplified_closes = pd.Series(simplify(closes, levels=self.__levels))
+            levels = _detect_levels(closes, self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE)
+            simplified_closes = pd.Series(simplify(closes, levels=levels))
         else:
-            self.__levels = None
             simplified_closes = closes.copy()
         # Calculate indicators
-        fast_emas: pd.Series
-        slow_emas: pd.Series
-        rsis: pd.Series
-        adxs: pd.Series
-        ccis: pd.Series
-        if self.__USING_SIMPLIFIED_PRICE_FOR_INDICATORS and self.__levels is not None:
-            simplified_highs = pd.Series(simplify(highs, levels=self.__levels))
-            simplified_lows = pd.Series(simplify(lows, levels=self.__levels))
-            fast_emas = EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_FAST).ema_indicator()
-            slow_emas = EMAIndicator(simplified_closes, window=self.__EMA_WINDOW_SLOW).ema_indicator()
-            rsis = RSIIndicator(simplified_closes, window=self.__RSI_WINDOW).rsi()
-            adxs = ADXIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__ADX_WINDOW).adx()
-            ccis = CCIIndicator(simplified_highs, simplified_lows, simplified_closes, window=self.__CCI_WINDOW).cci()
-        else:
-            fast_emas = EMAIndicator(closes, window=self.__EMA_WINDOW_FAST).ema_indicator()
-            slow_emas = EMAIndicator(closes, window=self.__EMA_WINDOW_SLOW).ema_indicator()
-            rsis = RSIIndicator(closes, window=self.__RSI_WINDOW).rsi()
-            adxs = ADXIndicator(highs, lows, closes, window=self.__ADX_WINDOW).adx()
-            ccis = CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci()
+        fast_emas = EMAIndicator(closes, window=self.__EMA_WINDOW_FAST).ema_indicator()
+        slow_emas = EMAIndicator(closes, window=self.__EMA_WINDOW_SLOW).ema_indicator()
+        rsis = RSIIndicator(closes, window=self.__RSI_WINDOW).rsi()
+        adxs = ADXIndicator(highs, lows, closes, window=self.__ADX_WINDOW).adx()
+        ccis = CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci()
         # Project the simplified closes into the future
         for i in range(len(simplified_closes)):
             if i + self.__PROJECTION_DISTANCE <= len(simplified_closes) - 1:
@@ -313,7 +290,7 @@ class DailyAsset(ABC):
             self.__indicators.append(DailyIndicator(
                 candle.date, actual_close, simplified_close,
                 # Indicators near the end date will be recalculated each time historical data is retrieved
-                simplified_close, (fast_ema, slow_ema), rsi, adx, cci,
+                (fast_ema, slow_ema), rsi, adx, cci,
             ))
 
     # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
@@ -332,21 +309,16 @@ class DailyAsset(ABC):
         ):
             raise ValueError
         prices: List[DailyPrice] = []
-        # Recalculate the indicators
         start_date_index = end_date_index - (days_num - 1)
-        indicators: List[DailyIndicator]
-        if self.__USING_SIMPLIFIED_PRICE_FOR_INDICATORS and self.__levels is not None:
-            indicators = self.__recalc_indicators(start_date_index, end_date_index)
-        else:
-            indicators = self.__indicators[start_date_index:end_date_index + 1]
+        indicators = self.__indicators[start_date_index:end_date_index + 1]
         # Historical prices for the days before `end_date`
         for i in range(len(indicators)):
             prices.append(DailyPrice(
                 indicators[i].date,
                 indicators[i].actual_price,
-                indicators[i].general_simplified_price,
+                indicators[i].simplified_price,
                 # Features
-                indicators[i].spot_simplified_price / indicators[i - self.__DELTA_DISTANCE].spot_simplified_price - 1,
+                indicators[i].actual_price / indicators[i - self.__DELTA_DISTANCE].actual_price - 1,
                 indicators[i].emas[0] / indicators[i].emas[1] - 1,
                 indicators[i].rsi / 100,  # RSI range between 0 and 100
                 indicators[i].adx / 100,  # ADX range between 0 and 100
@@ -364,7 +336,7 @@ class DailyAsset(ABC):
             cls.__ADX_WINDOW * 2 - 1,  # For first `0`s of ADXs
             cls.__CCI_WINDOW - 1,  # For first `nan`s of CCIs
         )
-        futuristic_buffer_days_num = cls.__PROJECTION_DISTANCE  # For last `nan`s of general simplified closes
+        futuristic_buffer_days_num = cls.__PROJECTION_DISTANCE  # For last `nan`s of simplified closes
         return historical_buffer_days_num, futuristic_buffer_days_num
 
     @property
@@ -391,56 +363,6 @@ class DailyAsset(ABC):
 
     def __get_date_index(self, date: datetime.date) -> Optional[int]:
         return self.__date_indices.get(date.strftime(self.__DATE_FORMAT))
-
-    # Chronological order of the terms mentioned in this function:
-    # "recalc start" -> "last prev level" ("second-last level") -> "end date" -> "next level" ("last level")
-    def __recalc_indicators(self, start_date_index: int, end_date_index: int) -> List[DailyIndicator]:
-        # List the levels that appear before the end date
-        prev_level_indices = [i for i in self.__levels.keys() if i <= end_date_index]
-        if len(prev_level_indices) >= 1 and prev_level_indices[-1] != end_date_index:
-            # When updating the "last level", we might also need to update the "second-last level"
-            # (see "Case 2" in the `detect_levels` function).
-            # Here we don't know the index of the next level ("last level") because it appears after the end date.
-            # Therefore, we must assume that the index of the last level right before the end date ("second-last level")
-            # when we have data up to the end date is different from the index when we have data up to the next level.
-            # We handle this by removing the last level right before the end date ("second-last level")
-            # and rerunning the detect function, with data up to the end date.
-            prev_level_indices.pop()
-        # We start recalculating from the level before the "second-last level" (exclusive)
-        recalc_start_index = 0 if len(prev_level_indices) == 0 else prev_level_indices[-1]
-        end_closes = [i.actual_price for i in self.__indicators[recalc_start_index:end_date_index + 1]]
-        # Detect levels between the start level and the end date because as explained above,
-        # these levels might differ from those stored in `self.__levels`, since we only have data up to the end date.
-        if self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE is None:
-            raise ValueError
-        end_levels = detect_levels(
-            end_closes, self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE,
-            first_level_type=self.__levels.get(recalc_start_index, LevelType.SUPPORT),
-        )
-        # We need candle from the start level to be the first price when simplifying the prices up to end date.
-        # However, since we don't need to recalculate its indicators, we remove it with `[1:]`.
-        simplified_end_closes = simplify(end_closes, levels=end_levels)[1:]
-        # Calculate the end indicators
-        end_indicators: List[DailyIndicator] = []
-        emas = self.__indicators[recalc_start_index].emas
-        for indicator, simplified_end_close in zip(
-            self.__indicators[recalc_start_index + 1:end_date_index + 1],
-            simplified_end_closes,
-            strict=True,
-        ):
-            emas = (
-                _calc_ema(simplified_end_close, emas[0], self.__EMA_WINDOW_FAST),
-                _calc_ema(simplified_end_close, emas[1], self.__EMA_WINDOW_SLOW),
-            )
-            end_indicators.append(DailyIndicator(
-                indicator.date, indicator.actual_price, indicator.general_simplified_price,
-                # TODO: Calculate other indicators
-                simplified_end_close, emas, 0, 0, 0,
-            ))
-        # There are cases where the start date index appears after the index from which we start recalculating
-        indicators = self.__indicators[start_date_index:recalc_start_index + 1] \
-            + end_indicators[max(0, start_date_index - (recalc_start_index + 1)):]
-        return indicators
 
 
 # In "Case 2" updating the last level requires checking for a new value in the second-last level.
@@ -479,7 +401,7 @@ class DailyAsset(ABC):
 # The following function implements "Case 2" to always update both the last and second-last levels,
 # regardless of whether the last level is support or resistance.
 # According to the above argument, this is redundant, and we should add checking code to avoid unnecessary handling.
-def detect_levels(
+def _detect_levels(
     prices: List[float],
     min_price_change_ratio_magnitude: Union[float, Tuple[float, float]],
     first_level_type: LevelType = LevelType.SUPPORT,
@@ -578,9 +500,3 @@ def simplify(prices: List[float], levels: Optional[OrderedDict[int, LevelType]] 
             simplified_prices.append(simplified_price)
     simplified_prices.append(prices[len(prices) - 1])
     return simplified_prices
-
-
-def _calc_ema(price: float, prev_ema: float, window: int) -> float:
-    ema_smoothing_factor = 2 / (window + 1)  # See: https://www.investopedia.com/terms/e/ema.asp
-    ema = ema_smoothing_factor * price + (1 - ema_smoothing_factor) * prev_ema
-    return ema

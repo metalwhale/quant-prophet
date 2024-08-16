@@ -1,10 +1,5 @@
-import datetime
-
 import numpy as np
-import pandas as pd
-from ta.trend import EMAIndicator
 
-from trainer.asset.base import DailyAsset, detect_levels, simplify
 from trainer.env.asset_pool import AssetPool
 from trainer.env.trading_platform import AmountType, PriceType, TradingPlatform
 from train import generate_zigzag_assets
@@ -32,38 +27,5 @@ def test_earning_calculation() -> bool:
     return True
 
 
-def test_indicator_recalculation() -> bool:
-    DailyAsset._DailyAsset__USING_SIMPLIFIED_PRICE_FOR_INDICATORS = True
-    PUBLISHED_DATE_STR = "2020-01-01"
-    HISTORICAL_DAYS_NUM = 90
-    EPSILON = 1e-14
-    end_date = datetime.datetime.strptime("2022-01-01", "%Y-%m-%d").date()
-    while True:
-        DailyAsset._DailyAsset__MIN_PRICE_CHANGE_RATIO_MAGNITUDE = np.random.uniform(0, 1)
-        asset = generate_zigzag_assets(PUBLISHED_DATE_STR, 1)[0]
-        # Don't set `max_date` because we need to check up to the last tradable date
-        if end_date > asset.find_matched_tradable_date_range(HISTORICAL_DAYS_NUM)[-1]:
-            break
-        asset.prepare_indicators()
-        prices = asset.retrieve_historical_prices(end_date, HISTORICAL_DAYS_NUM,)
-        # Manually calculate indicators
-        end_date_index = asset._DailyAsset__get_date_index(end_date)
-        actual_prices = [p.actual_price for p in asset._DailyAsset__indicators][:end_date_index + 1]
-        levels = detect_levels(actual_prices, DailyAsset._DailyAsset__MIN_PRICE_CHANGE_RATIO_MAGNITUDE)
-        simplified_prices = pd.Series(simplify(actual_prices, levels=levels))
-        fast_emas = EMAIndicator(simplified_prices, window=DailyAsset._DailyAsset__EMA_WINDOW_FAST).ema_indicator()
-        slow_emas = EMAIndicator(simplified_prices, window=DailyAsset._DailyAsset__EMA_WINDOW_SLOW).ema_indicator()
-        # Compare the calculated results of indicators
-        start_date_index = end_date_index - (HISTORICAL_DAYS_NUM - 1)
-        fast_emas = fast_emas[start_date_index:]
-        slow_emas = slow_emas[start_date_index:]
-        for price, fast_ema, slow_ema in zip(prices, fast_emas, slow_emas, strict=True):
-            if abs(price.ema_diff_ratio - (fast_ema / slow_ema - 1)) >= EPSILON:
-                return False
-        end_date += datetime.timedelta(days=1)
-    return True
-
-
 if __name__ == "__main__":
     print(test_earning_calculation())
-    print(test_indicator_recalculation())
