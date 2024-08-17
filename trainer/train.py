@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
-from stable_baselines3 import DQN
+from stable_baselines3 import PPO
 
 from trainer.asset.base import DailyAsset
 from trainer.asset.stock import Stock, StockIndex
@@ -15,13 +15,13 @@ from trainer.env.evaluation import FullEvalCallback
 
 
 def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, TradingPlatform]]:
-    FIRST_TRAINING_DATE = datetime.datetime.strptime("1990-01-01", "%Y-%m-%d").date()
-    LAST_TRAINING_DATE = datetime.datetime.strptime("2009-12-31", "%Y-%m-%d").date()
+    FIRST_TRAINING_DATE = datetime.datetime.strptime("2000-01-01", "%Y-%m-%d").date()
+    LAST_TRAINING_DATE = datetime.datetime.strptime("2015-12-31", "%Y-%m-%d").date()
     EVAL_DATE_RANGES = [
         datetime.datetime.strptime(d, "%Y-%m-%d").date() if d is not None else None
-        for d in ["2014-12-31", "2019-12-31", None]
+        for d in ["2018-12-31", "2021-12-31", None]
     ]
-    HISTORICAL_DAYS_NUM = MONTHLY_TRADABLE_DAYS_NUM * 6
+    HISTORICAL_DAYS_NUM = MONTHLY_TRADABLE_DAYS_NUM * 4
     assets = [a for a in assets if a.published_date <= FIRST_TRAINING_DATE]
     assets.sort(key=lambda asset: asset.symbol)
     # Training environment
@@ -34,7 +34,7 @@ def generate_envs(assets: List[DailyAsset]) -> Tuple[TradingPlatform, Dict[str, 
     rep_train_env.set_mode(False)
     rep_train_env.figure_num = "train"
     # Evaluation environments
-    eval_envs: Dict[str, TradingPlatform] = {"0train": rep_train_env}  # Use train env for evaluation as well
+    eval_envs: Dict[str, TradingPlatform] = {}  # {"0train": rep_train_env}  # Use train env for evaluation as well
     for i, last_eval_date in enumerate(EVAL_DATE_RANGES):
         eval_asset_pool = AssetPool(assets)
         eval_asset_pool.apply_date_range(
@@ -80,9 +80,9 @@ def train(env_type: str):
     elif env_type == "zigzag":
         train_env, eval_envs = generate_envs(generate_zigzag_assets("1980-01-01", 5))
     now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    model = DQN(
+    model = PPO(
         "MultiInputPolicy", train_env,
-        gamma=0.9,
+        gamma=0.95,
         policy_kwargs={"net_arch": [128, 128, 128]},
         verbose=1,
     )
@@ -90,10 +90,10 @@ def train(env_type: str):
         total_timesteps=20000000,
         callback=FullEvalCallback(
             Path(__file__).parent.parent / "data" / env_type / "output" / now,
-            eval_envs, 100,
+            eval_envs, 500,
             showing_image=False,
         ),
-        log_interval=100,
+        log_interval=500,
     )
 
 

@@ -160,8 +160,8 @@ class TradingPlatform(gym.Env):
     _historical_days_num: int  # Number of days used for retrieving historical data
 
     # Hyperparameters
-    _recent_days_num: int = 1
-    _high_freq_manipulation: Optional[Tuple[int]] = (1,)  # Number of holding days
+    _recent_days_num: int = 40
+    _high_freq_manipulation: Optional[Tuple[int]] = (20,)  # Number of holding days
 
     # State components
     # Episode-level, only changed if we reset to begin a new episode
@@ -197,12 +197,12 @@ class TradingPlatform(gym.Env):
         # Environment
         self.action_space = gym.spaces.Discrete(len(PositionType))
         self.observation_space = gym.spaces.Dict({
-            "historical_price_delta_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            # "historical_price_delta_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             "historical_ema_diff_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
-            "historical_scaled_rsis": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
-            "historical_scaled_adxs": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
-            "historical_scaled_ccis": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
-            "last_position_type": gym.spaces.Discrete(len(PositionType)),
+            # "historical_scaled_rsis": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
+            # "historical_scaled_adxs": gym.spaces.Box(0, 1, shape=(self._historical_days_num,)),
+            # "historical_scaled_ccis": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
+            # "last_position_type": gym.spaces.Discrete(len(PositionType)),
         })
 
     def reset(
@@ -288,7 +288,7 @@ class TradingPlatform(gym.Env):
     def render(self) -> Any | List[Any] | None:
         YEAR_WIDTH = 2
         SUBPLOT_HEIGHT = 3
-        FEATURES = ["ema_diff_ratio", "scaled_rsi", "scaled_adx", "scaled_cci"]
+        FEATURES = ["ema_diff_ratio"]  # ["ema_diff_ratio", "scaled_rsi", "scaled_adx", "scaled_cci"]
         TOP_MARGIN = 350
         BOTTOM_MARGIN = 150
         subplots_num = len(FEATURES) + 2  # 2 subplots other than features are for prices and action values
@@ -498,21 +498,21 @@ class TradingPlatform(gym.Env):
     def _obtain_observation(self) -> Dict[str, Any]:
         # Observation for historical features
         historical_ema_diff_ratios = [p.ema_diff_ratio for p in self._prices]
-        historical_scaled_rsis = [p.scaled_rsi for p in self._prices]
-        historical_scaled_adxs = [p.scaled_adx for p in self._prices]
-        historical_scaled_ccis = [p.scaled_cci for p in self._prices]
+        # historical_scaled_rsis = [p.scaled_rsi for p in self._prices]
+        # historical_scaled_adxs = [p.scaled_adx for p in self._prices]
+        # historical_scaled_ccis = [p.scaled_cci for p in self._prices]
         # Observation for the last position
         last_position_type = PositionType.HOLD
         if len(self._positions) > 0:
             last_position_type = self._positions[-1].position_type
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
-            "historical_price_delta_ratios": np.array([p.price_delta_ratio for p in self._prices]),
+            # "historical_price_delta_ratios": np.array([p.price_delta_ratio for p in self._prices]),
             "historical_ema_diff_ratios": np.array(historical_ema_diff_ratios),
-            "historical_scaled_rsis": np.array(historical_scaled_rsis),
-            "historical_scaled_adxs": np.array(historical_scaled_adxs),
-            "historical_scaled_ccis": np.array(historical_scaled_ccis),
-            "last_position_type": np.array([last_position_type.value], dtype=int),
+            # "historical_scaled_rsis": np.array(historical_scaled_rsis),
+            # "historical_scaled_adxs": np.array(historical_scaled_adxs),
+            # "historical_scaled_ccis": np.array(historical_scaled_ccis),
+            # "last_position_type": np.array([last_position_type.value], dtype=int),
         }
 
 

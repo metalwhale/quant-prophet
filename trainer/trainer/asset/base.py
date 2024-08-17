@@ -246,18 +246,18 @@ class DailyAsset(ABC):
     __indicators: List[DailyIndicator]
     __prev_random_radius: Optional[float]
 
-    __MODIFICATION_TYPE: ModificationType = ModificationType.ORIGINAL
+    __MODIFICATION_TYPE: ModificationType = ModificationType.CMA_LEVEL
     # TODO: Choose better values
-    __LEVEL_BASIC_PRICE_CHANGE: Tuple[Tuple[float, float], ...] = ((0.0, 0.0), (0.0, 0.0), (0.0, 0.0))
-    __LEVEL_PREEMPTIVE_REALIZATION_TARGET: float = 1.0
-    __LEVEL_PULLBACK_DAYS_NUM: int = 0
-    __LEVEL_PULLBACK_WEIGHT: float = 0.0
-    __CMA_RADIUS: int = 0
+    __LEVEL_BASIC_PRICE_CHANGE: Optional[Tuple[Tuple[float, float], ...]] = ((0.02, 0.06),)
+    __LEVEL_PREEMPTIVE_REALIZATION_TARGET: float = 0.9
+    __LEVEL_PULLBACK_DAYS_NUM: int = 10
+    __LEVEL_PULLBACK_WEIGHT: float = 0.5
+    __CMA_RADIUS: int = 2
     # NOTE: When adding a new hyperparameter to calculate historical and futuristic data,
     # remember to modify `calc_buffer_days_num` method
     __DELTA_DISTANCE = 1
-    __EMA_WINDOW_FAST = 5
-    __EMA_WINDOW_SLOW = 20
+    __EMA_WINDOW_FAST = 10
+    __EMA_WINDOW_SLOW = 25
     __RSI_WINDOW = 14
     __ADX_WINDOW = 14
     __CCI_WINDOW = 20
@@ -380,9 +380,9 @@ class DailyAsset(ABC):
         # Calculate indicators
         fast_emas = EMAIndicator(closes, window=self.__EMA_WINDOW_FAST).ema_indicator()
         slow_emas = EMAIndicator(closes, window=self.__EMA_WINDOW_SLOW).ema_indicator()
-        rsis = RSIIndicator(closes, window=self.__RSI_WINDOW).rsi()
-        adxs = ADXIndicator(highs, lows, closes, window=self.__ADX_WINDOW).adx()
-        ccis = CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci()
+        rsis = closes  # RSIIndicator(closes, window=self.__RSI_WINDOW).rsi()
+        adxs = closes  # ADXIndicator(highs, lows, closes, window=self.__ADX_WINDOW).adx()
+        ccis = closes  # CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci()
         # Store the indicators
         self.__indicators = []
         for (candle, low, high, actual_close, modified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
@@ -515,9 +515,9 @@ def _detect_levels(
     if len(levels) == 0:
         return levels
     # Detect basic minor levels
-    levels = _detect_basic_minor_levels(prices, levels, *basic_price_change)
+    # levels = _detect_basic_minor_levels(prices, levels, *basic_price_change)
     # Detect preemptive levels
-    levels = _detect_preemptive_levels(prices, levels, preemptive_realization_target)
+    # levels = _detect_preemptive_levels(prices, levels, preemptive_realization_target)
     # Detect pullback levels
     levels = _detect_pullback_levels(prices, levels, pullback_days_num, pullback_weight)
     return levels
@@ -666,10 +666,6 @@ def _detect_basic_minor_levels(
             # Uptrend
             major_levels[major_index].level_type == LevelType.SUPPORT
             and prices[next_major_index] / prices[major_index] >= 1 + significant_resistance_change
-        ) or (
-            # Downtrend
-            major_levels[major_index].level_type == LevelType.RESISTANCE
-            and prices[next_major_index] / prices[major_index] <= 1 - significant_support_change
         )
         # Only consider trends with significant price changes
         if not is_significant_trend:
