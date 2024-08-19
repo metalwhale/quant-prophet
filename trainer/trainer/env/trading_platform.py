@@ -147,7 +147,7 @@ class TradingPlatform(gym.Env):
     _historical_days_num: int  # Number of days used for retrieving historical data
 
     # Hyperparameters
-    _short_period_penalty: Optional[Tuple[float, float]] = [0.0, 0.0]  # Penalty and discount factor
+    _high_recent_frequency_penalty: Optional[Tuple[float, int]] = None  # Penalty and day delta
 
     # State components
     # Episode-level, only changed if we reset to begin a new episode
@@ -157,6 +157,7 @@ class TradingPlatform(gym.Env):
     _date_index: int  # Grows in the same episode, resets to 0 for a new episode
     _prices: List[DailyPrice]  # Updated whenever the date changes
     _positions: List[Position]  # Keeps adding positions in the same episode, clears them all for a new episode
+    _recent_positions: List[Position]  # Used to calculate penalty for opening too many positions recently
 
     # Extra information
     _extra_info: ExtraInfo
@@ -187,7 +188,7 @@ class TradingPlatform(gym.Env):
             "historical_scaled_ccis": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             "last_position_type": gym.spaces.Discrete(len(PositionType)),
             "last_position_net_ratio": gym.spaces.Box(-1, 1, shape=(1,)),
-            "last_position_holding_days_num": gym.spaces.Box(0, np.inf, shape=(1,)),
+            "recent_positions_num": gym.spaces.Box(0, 1, shape=(1,)),
         })
 
     def reset(
@@ -203,6 +204,7 @@ class TradingPlatform(gym.Env):
         self._date_index = 0
         self._retrieve_prices()
         self._positions = []
+        self._recent_positions = []
         observation = self._obtain_observation()
         info = {}
         self._extra_info = self.ExtraInfo()
@@ -214,7 +216,19 @@ class TradingPlatform(gym.Env):
         if len(self._positions) == 0 or action != self._positions[-1].position_type.value:
             amount = self._POSITION_AMOUNT_UNIT if self._position_amount_type == AmountType.UNIT \
                 else self._prices[-1].actual_price
-            self._positions.append(Position(self._prices[-1].date, PositionType(action), self._prices[-1], amount))
+            position = Position(self._prices[-1].date, PositionType(action), self._prices[-1], amount)
+            self._positions.append(position)
+            # Penalize if too many positions are opened recently
+            if self._high_recent_frequency_penalty is not None:
+                penalty, recent_day_delta = self._high_recent_frequency_penalty
+                if (
+                    len(self._recent_positions) > 0
+                    # TODO: Instead of using day delta (based on datetime), use the number of days (based on tradable days)
+                    and (self._prices[-1].date - self._recent_positions[0].date).days > recent_day_delta
+                ):
+                    self._recent_positions.pop(0)
+                reward += position.amount * -penalty * len(self._recent_positions)
+                self._recent_positions.append(position)
         # Recalculate position's net by first reverting net of the current date.
         # The net of the next date will be calculated later.
         earning = -self._positions[-1].amount * self._last_position_net_ratio
@@ -230,11 +244,6 @@ class TradingPlatform(gym.Env):
         # Note that this doesn't mean it's not good to include the earning of BUY positions for reward.
         if self._positions[-1].position_type == PositionType.SELL:
             reward += earning
-        # Penalize if the position is held for too short a period
-        if self._short_period_penalty is not None:
-            penalty, discount_factor = self._short_period_penalty
-            reward += self._positions[-1].amount \
-                * -penalty * (discount_factor ** (self._prices[-1].date - self._positions[-1].date).days)
         # Read more about termination and truncation at:
         # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/handling_time_limits/
         # - https://farama.org/Gymnasium-Terminated-Truncated-Step-API
@@ -448,12 +457,13 @@ class TradingPlatform(gym.Env):
             self.np_random.choice([PositionType.BUY, PositionType.SELL])
         )
         last_position_net_ratio: float = 0
-        last_position_holding_days_num: float = 0
         if len(self._positions) > 0:
             last_position_type = self._positions[-1].position_type
             last_position_net_ratio = self._last_position_net_ratio
-            # TODO: Choose a better scaling factor
-            last_position_holding_days_num = (self._prices[-1].date - self._positions[-1].date).days / 20
+        recent_positions_num: float = 0
+        if self._high_recent_frequency_penalty is not None:
+            _, recent_day_delta = self._high_recent_frequency_penalty
+            recent_positions_num = len(self._recent_positions) / recent_day_delta
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_price_delta_ratios": np.array([p.price_delta_ratio for p in self._prices]),
@@ -463,7 +473,7 @@ class TradingPlatform(gym.Env):
             "historical_scaled_ccis": np.array([p.scaled_cci for p in self._prices]),
             "last_position_type": np.array([last_position_type.value], dtype=int),
             "last_position_net_ratio": np.array([last_position_net_ratio]),
-            "last_position_holding_days_num": np.array([last_position_holding_days_num]),
+            "recent_positions_num": np.array([recent_positions_num]),
         }
 
 
