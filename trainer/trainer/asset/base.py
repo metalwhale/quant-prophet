@@ -169,6 +169,7 @@ class DailyAsset(ABC):
 
     # TODO: Choose better values
     __MIN_PRICE_CHANGE_RATIO_MAGNITUDE: Optional[Union[float, Tuple[float, float]]] = None
+    __MIN_TREND_DAYS_NUM: int = 0
     # NOTE: When adding a new hyperparameter to calculate historical and futuristic data,
     # remember to modify `calc_buffer_days_num` method
     __DELTA_DISTANCE = 1
@@ -266,7 +267,7 @@ class DailyAsset(ABC):
         closes = pd.Series(closes)
         modified_closes: pd.Series
         if self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE is not None:
-            levels = _detect_levels(closes, self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE)
+            levels = _detect_levels(closes, self.__MIN_PRICE_CHANGE_RATIO_MAGNITUDE, self.__MIN_TREND_DAYS_NUM)
             modified_closes = pd.Series(_smooth(closes, levels=levels))
         else:
             modified_closes = closes.copy()
@@ -405,6 +406,7 @@ class DailyAsset(ABC):
 def _detect_levels(
     prices: List[float],
     min_price_change_ratio_magnitude: Union[float, Tuple[float, float]],
+    min_trend_days_num: int,
     first_level_type: LevelType = LevelType.SUPPORT,
 ) -> OrderedDict[int, LevelType]:
     min_support: float
@@ -429,7 +431,10 @@ def _detect_levels(
         last2_level_index = list(levels.keys())[-2] if len(levels) >= 2 else None
         if levels[last1_level_index] == LevelType.SUPPORT:
             # Case 1: Add a new resistance level if its price is higher than the last support level by a specified ratio
-            if prices[index] / prices[last1_level_index] >= 1 + min_resistance:
+            if (
+                index - last1_level_index >= min_trend_days_num
+                and prices[index] / prices[last1_level_index] >= 1 + min_resistance
+            ):
                 levels[index] = LevelType.RESISTANCE
             # Case 2: Update the last support level if the new price is lower
             elif prices[index] <= prices[last1_level_index]:
@@ -444,16 +449,22 @@ def _detect_levels(
                     # Update the second-last resistance level to the new highest price
                     if prices[highest_index] >= prices[last2_level_index]:
                         levels.pop(last2_level_index)
-                        levels[highest_index] = LevelType.RESISTANCE
+                        last2_level_index = highest_index
+                        levels[last2_level_index] = LevelType.RESISTANCE
                 else:
                     # Add the highest price as a second-last resistance level, preceding the last support level
                     if prices[index] / prices[highest_index] <= 1 - min_support:
-                        levels[highest_index] = LevelType.RESISTANCE
+                        last2_level_index = highest_index
+                        levels[last2_level_index] = LevelType.RESISTANCE
                 # Update the last support level
-                levels[index] = LevelType.SUPPORT
+                if last2_level_index is None or index - last2_level_index >= min_trend_days_num:
+                    levels[index] = LevelType.SUPPORT
         elif levels[last1_level_index] == LevelType.RESISTANCE:
             # Case 1: Add a new support level if its price is lower than the last resistance level by a specified ratio
-            if prices[index] / prices[last1_level_index] <= 1 - min_support:
+            if (
+                index - last1_level_index >= min_trend_days_num
+                and prices[index] / prices[last1_level_index] <= 1 - min_support
+            ):
                 levels[index] = LevelType.SUPPORT
             # Case 2: Update the last resistance level if the new price is higher
             elif prices[index] >= prices[last1_level_index]:
@@ -468,13 +479,16 @@ def _detect_levels(
                     # Update the second-last support level to the new lowest price
                     if prices[lowest_index] <= prices[last2_level_index]:
                         levels.pop(last2_level_index)
-                        levels[lowest_index] = LevelType.SUPPORT
+                        last2_level_index = lowest_index
+                        levels[last2_level_index] = LevelType.SUPPORT
                 else:
                     # Add the lowest price as a second-last support level, preceding the last resistance level
                     if prices[index] / prices[lowest_index] >= 1 + min_resistance:
-                        levels[lowest_index] = LevelType.SUPPORT
+                        last2_level_index = lowest_index
+                        levels[last2_level_index] = LevelType.SUPPORT
                 # Update the last resistance level
-                levels[index] = LevelType.RESISTANCE
+                if last2_level_index is None or index - last2_level_index >= min_trend_days_num:
+                    levels[index] = LevelType.RESISTANCE
     if len(levels) == 1:
         # If no levels are detected other than the initial one, clear the list of levels
         levels = OrderedDict()
