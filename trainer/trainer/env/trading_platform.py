@@ -100,6 +100,7 @@ class TradingPlatform(gym.Env):
 
     # Control flags
     _randomizing: bool
+    _adding_noise: bool
     _position_net_price_type: PriceType
     _position_amount_type: AmountType
 
@@ -426,6 +427,7 @@ class TradingPlatform(gym.Env):
 
     def set_mode(self, is_training: bool):
         self._randomizing = is_training
+        self._adding_noise = is_training
         self._position_net_price_type = PriceType.MODIFIED if is_training else PriceType.ACTUAL
         self._position_amount_type = AmountType.UNIT if is_training else AmountType.SPOT
 
@@ -452,6 +454,37 @@ class TradingPlatform(gym.Env):
         self._prices = self._asset.retrieve_historical_prices(date, self._historical_days_num)
 
     def _obtain_observation(self) -> Dict[str, Any]:
+        # Observation for historical features
+        # TODO: Choose better conditions and noise values
+        historical_ema_diff_ratios = [
+            p.ema_diff_ratio if (
+                not self._adding_noise
+                or abs(p.ema_diff_ratio) >= 0.0 or np.random.uniform() >= 0.0  # Noise conditions
+            ) else 0  # Noise value
+            for p in self._prices
+        ]
+        historical_scaled_rsis = [
+            p.scaled_rsi if (
+                not self._adding_noise
+                or abs(p.scaled_rsi - 0.5) >= 0.0 or np.random.uniform() >= 0.0  # Noise conditions
+            ) else 0.5  # Noise value
+            for p in self._prices
+        ]
+        historical_scaled_adxs = [
+            p.scaled_adx if (
+                not self._adding_noise
+                or abs(p.scaled_adx - 0.5) >= 0.0 or np.random.uniform() >= 0.0  # Noise conditions
+            ) else 0.5  # Noise value
+            for p in self._prices
+        ]
+        historical_scaled_ccis = [
+            p.scaled_cci if (
+                not self._adding_noise
+                or abs(p.scaled_cci) >= 0.0 or np.random.uniform() >= 0.0  # Noise conditions
+            ) else 0  # Noise value
+            for p in self._prices
+        ]
+        # Observation for the last position
         last_position_type: PositionType = PositionType(
             # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
             self.np_random.choice([PositionType.BUY, PositionType.SELL])
@@ -460,6 +493,7 @@ class TradingPlatform(gym.Env):
         if len(self._positions) > 0:
             last_position_type = self._positions[-1].position_type
             last_position_net_ratio = self._last_position_net_ratio
+        # Observation for recent positions
         recent_positions_num: float = 0
         if self._high_recent_frequency_penalty is not None:
             _, recent_day_delta = self._high_recent_frequency_penalty
@@ -467,10 +501,10 @@ class TradingPlatform(gym.Env):
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_price_delta_ratios": np.array([p.price_delta_ratio for p in self._prices]),
-            "historical_ema_diff_ratios": np.array([p.ema_diff_ratio for p in self._prices]),
-            "historical_scaled_rsis": np.array([p.scaled_rsi for p in self._prices]),
-            "historical_scaled_adxs": np.array([p.scaled_adx for p in self._prices]),
-            "historical_scaled_ccis": np.array([p.scaled_cci for p in self._prices]),
+            "historical_ema_diff_ratios": np.array(historical_ema_diff_ratios),
+            "historical_scaled_rsis": np.array(historical_scaled_rsis),
+            "historical_scaled_adxs": np.array(historical_scaled_adxs),
+            "historical_scaled_ccis": np.array(historical_scaled_ccis),
             "last_position_type": np.array([last_position_type.value], dtype=int),
             "last_position_net_ratio": np.array([last_position_net_ratio]),
             "recent_positions_num": np.array([recent_positions_num]),
