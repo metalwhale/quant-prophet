@@ -2,7 +2,7 @@ import datetime
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -168,7 +168,7 @@ class DailyAsset(ABC):
     __indicators: List[DailyIndicator]
 
     # TODO: Choose better values
-    __LEVEL_PRICE_CHANGE: Optional[Union[float, Tuple[float, float]]] = None
+    __LEVEL_PRICE_CHANGE: Optional[Tuple[Tuple[float, float], ...]] = None
     # NOTE: When adding a new hyperparameter to calculate historical and futuristic data,
     # remember to modify `calc_buffer_days_num` method
     __DELTA_DISTANCE = 1
@@ -266,10 +266,7 @@ class DailyAsset(ABC):
         closes = pd.Series(closes)
         modified_closes: pd.Series
         if self.__LEVEL_PRICE_CHANGE is not None:
-            levels = _detect_levels(
-                closes,
-                self.__LEVEL_PRICE_CHANGE,
-            )
+            levels = _detect_complex_levels(closes, *self.__LEVEL_PRICE_CHANGE)
             modified_closes = pd.Series(_smooth(closes, levels=levels))
         else:
             modified_closes = closes.copy()
@@ -370,6 +367,80 @@ class DailyAsset(ABC):
         return self.__date_indices.get(date.strftime(self.__DATE_FORMAT))
 
 
+def _detect_complex_levels(
+    prices: "pd.Series[float]",
+    major_price_change: Tuple[float, float],  # Ratio magnitude
+    minor_price_change: Tuple[float, float],  # Ratio magnitude
+    significant_price_change: Tuple[float, float],  # Ratio magnitude
+) -> OrderedDict[int, LevelType]:
+    # Price change between levels
+    major_support_change, major_resistance_change = major_price_change
+    minor_support_change, minor_resistance_change = minor_price_change
+    significant_support_change, significant_resistance_change = significant_price_change
+    if (
+        significant_support_change < 0 or significant_support_change > 1
+        or significant_resistance_change < 0 or significant_resistance_change > 1
+    ):
+        # Must be in the range 0 to 1
+        raise ValueError
+    # Detect major levels
+    major_levels = _detect_simple_levels(prices, major_price_change)
+    if len(major_levels) == 0:
+        return major_levels
+    # Find trends with significant price change
+    levels: OrderedDict[int, LevelType] = OrderedDict()
+    major_level_indices = list(major_levels.keys())
+    for major_index, next_major_index in zip(major_level_indices[:-1], major_level_indices[1:]):
+        levels[major_index] = major_levels[major_index]
+        if (
+            major_levels[major_index] == LevelType.SUPPORT
+            and prices[next_major_index] / prices[major_index] >= 1 + significant_resistance_change
+        ) or (
+            major_levels[major_index] == LevelType.RESISTANCE
+            and prices[next_major_index] / prices[major_index] <= 1 - significant_support_change
+        ):
+            price_change: Tuple[float, float]
+            if major_levels[major_index] == LevelType.SUPPORT:
+                price_change = (minor_support_change, major_resistance_change)
+            elif major_levels[major_index] == LevelType.RESISTANCE:
+                price_change = (major_support_change, minor_resistance_change)
+            else:
+                raise ValueError
+            # Detect minor levels
+            trend_prices = prices[major_index:next_major_index + 1].copy().reset_index(drop=True)
+            minor_levels = _detect_simple_levels(
+                trend_prices, price_change,
+                first_level_type=major_levels[next_major_index],
+            )
+            if (
+                # The first minor level, if detected, must have the same type as the major level that starts this trend
+                0 in minor_levels
+                and minor_levels[0] != major_levels[major_index]
+            ) or (
+                # The last minor level, if detected, must have the same type as the major level that ends this trend
+                len(trend_prices) - 1 in minor_levels
+                and minor_levels[len(trend_prices) - 1] != major_levels[next_major_index]
+            ):
+                raise Exception
+            minor_level_indices = list(minor_levels.keys())
+            if len(minor_level_indices) > 0:
+                skipped_minor_levels_indices: Set[int] = set()
+                if 0 not in minor_levels:
+                    # Skip the first minor levels if the first price change is insufficient
+                    skipped_minor_levels_indices.add(minor_level_indices[0])
+                    skipped_minor_levels_indices.add(minor_level_indices[1])
+                if len(trend_prices) - 1 not in minor_levels:
+                    # Skip the last minor levels if the last price change is insufficient
+                    skipped_minor_levels_indices.add(minor_level_indices[-1])
+                    skipped_minor_levels_indices.add(minor_level_indices[-2])
+                for index in skipped_minor_levels_indices:
+                    minor_levels.pop(index)
+            for minor_index, minor_level_type in minor_levels.items():
+                levels[major_index + minor_index] = minor_level_type
+    levels[major_level_indices[-1]] = major_levels[major_level_indices[-1]]
+    return levels
+
+
 # In "Case 2" updating the last level requires checking for a new value in the second-last level.
 # Initially, it might seem like that after updating the second-last level we need to apply a same rule recursively,
 # and update all previous levels back to the first level, but this is not necessary.
@@ -406,25 +477,20 @@ class DailyAsset(ABC):
 # The following function implements "Case 2" to always update both the last and second-last levels,
 # regardless of whether the last level is support or resistance.
 # According to the above argument, this is redundant, and we should add checking code to avoid unnecessary handling.
-def _detect_levels(
-    prices: List[float],
-    price_change: Union[float, Tuple[float, float]],  # Ratio magnitude
+def _detect_simple_levels(
+    prices: "pd.Series[float]",
+    price_change: Tuple[float, float],  # Ratio magnitude
     first_level_type: LevelType = LevelType.SUPPORT,
 ) -> OrderedDict[int, LevelType]:
     # Price change between levels
-    support_change: float
-    resistance_change: float
-    if isinstance(price_change, float):
-        support_change = price_change
-        resistance_change = price_change
-    elif isinstance(price_change, tuple):
-        support_change, resistance_change = price_change
+    support_change, resistance_change = price_change
     if (
         support_change < 0 or support_change > 1
         or resistance_change < 0 or resistance_change > 1
     ):
         # Must be in the range 0 to 1
         raise ValueError
+    # Detect levels
     levels: OrderedDict[int, LevelType] = OrderedDict()
     index = 0
     levels[index] = first_level_type
@@ -490,7 +556,7 @@ def _detect_levels(
     return levels
 
 
-def _smooth(prices: List[float], levels: Optional[OrderedDict[int, LevelType]] = None) -> np.ndarray:
+def _smooth(prices: "pd.Series[float]", levels: Optional[OrderedDict[int, LevelType]] = None) -> np.ndarray:
     if levels is None:
         return prices
     # `0` means setting the derivative to zero at each level
