@@ -2,7 +2,7 @@ import datetime
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from enum import Enum
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -423,18 +423,13 @@ def _detect_complex_levels(
             ):
                 raise Exception
             minor_level_indices = list(minor_levels.keys())
-            if len(minor_level_indices) > 0:
-                skipped_minor_levels_indices: Set[int] = set()
-                if 0 not in minor_levels:
-                    # Skip the first minor levels if the first price change is insufficient
-                    skipped_minor_levels_indices.add(minor_level_indices[0])
-                    skipped_minor_levels_indices.add(minor_level_indices[1])
-                if len(trend_prices) - 1 not in minor_levels:
-                    # Skip the last minor levels if the last price change is insufficient
-                    skipped_minor_levels_indices.add(minor_level_indices[-1])
-                    skipped_minor_levels_indices.add(minor_level_indices[-2])
-                for index in skipped_minor_levels_indices:
-                    minor_levels.pop(index)
+            if len(minor_level_indices) > 0 and 0 not in minor_levels:
+                # Skip the first minor levels if the first price change is insufficient
+                minor_levels.pop(minor_level_indices[0])
+                minor_levels.pop(minor_level_indices[1])
+                # We don't skip the last minor levels because, in a trend with significant price changes,
+                # they are nearly the same price as the last date of the trend.
+                # Detecting them helps us take profit earlier rather than waiting until the last date.
             for minor_index, minor_level_type in minor_levels.items():
                 levels[major_index + minor_index] = minor_level_type
     levels[major_level_indices[-1]] = major_levels[major_level_indices[-1]]
