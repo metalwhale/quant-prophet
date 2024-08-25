@@ -10,7 +10,7 @@ from matplotlib.axes import Axes
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3 import DQN
 
-from ..asset.base import DailyAsset, DailyPrice
+from ..asset.base import DailyAsset, DailyPrice, LevelType
 from .asset_pool import AssetPool
 
 
@@ -288,6 +288,7 @@ class TradingPlatform(gym.Env):
             clear=True,
         )
         figure_height = (figure.get_size_inches() * figure.dpi)[1]
+        vertical_padding = figure_height / subplots_num * 0.00002  # NOTE: Hard-coded, adjust if the figure size changes
         figure.subplots_adjust(
             left=100 / len(dates), right=0.99,
             top=1 - TOP_MARGIN / figure_height, bottom=BOTTOM_MARGIN / figure_height,
@@ -296,12 +297,15 @@ class TradingPlatform(gym.Env):
         # Plot prices
         axes = figure.add_subplot(subplots_num, 1, 1)
         all_axes.append(("price", axes, {p.date: p.actual_price for p in prices}))
+        actual_prices = [p.actual_price for p in prices]
+        actual_prices_range = max(actual_prices) - min(actual_prices)
         position_index: Optional[int] = None
         date_prices: List[Tuple[datetime.date, float]] = []
         for i, price in enumerate(prices):
             next_position_index = 0 if position_index is None else position_index + 1
             date_price = (price.date, price.actual_price)  # Use actual price and ignore position's entry price
             date_prices.append(date_price)
+            # Plot position price
             if (
                 # Position type changes
                 (len(self._positions) > next_position_index and price.date == self._positions[next_position_index].date)
@@ -329,6 +333,16 @@ class TradingPlatform(gym.Env):
                 # Move to next position
                 position_index = next_position_index
                 date_prices = [date_price]
+            # Plot level
+            if price.level_type is not None:
+                is_support = price.level_type == LevelType.SUPPORT
+                padding = actual_prices_range * vertical_padding / price.actual_price
+                axes.plot(
+                    price.date, price.actual_price * (1 + (-1 if is_support else 1) * padding),
+                    color="green" if is_support else "red",
+                    marker="^" if is_support else "v",
+                    markersize=0.5,
+                )
         axes.plot(dates, [p.modified_price if p.date in dates else None for p in prices], alpha=0.5)
         # Plot features
         for i, feature in enumerate(FEATURES):

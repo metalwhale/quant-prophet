@@ -95,8 +95,14 @@ class DailyIndicator:
         return self._cci
 
 
+class LevelType(Enum):
+    SUPPORT = 0
+    RESISTANCE = 1
+
+
 class DailyPrice:
     _date: datetime.date
+    _level_type: Optional[LevelType]
     _actual_price: float
     _modified_price: float
     _price_delta_ratio: float  # Change in price expressed as a ratio compared to the previous day
@@ -108,11 +114,12 @@ class DailyPrice:
     def __init__(
         self,
         date: datetime.date,
-        actual_price: float, modified_price: float,
+        level_type: Optional[LevelType], actual_price: float, modified_price: float,
         price_delta_ratio: float, ema_diff_ratio: float,
         scaled_rsi: float, scaled_adx: float, scaled_cci: float,
     ) -> None:
         self._date = date
+        self._level_type = level_type
         self._actual_price = actual_price
         self._modified_price = modified_price
         self._price_delta_ratio = price_delta_ratio
@@ -124,6 +131,10 @@ class DailyPrice:
     @property
     def date(self) -> datetime.date:
         return self._date
+
+    @property
+    def level_type(self) -> Optional[LevelType]:
+        return self._level_type
 
     @property
     def actual_price(self) -> float:
@@ -154,17 +165,13 @@ class DailyPrice:
         return self._scaled_cci
 
 
-class LevelType(Enum):
-    SUPPORT = 0
-    RESISTANCE = 1
-
-
 class DailyAsset(ABC):
     __symbol: str
     # Initialized only once
     __candles: List[DailyCandle]
     __date_indices: Dict[str, int]
     # Recalculated when preparing indicator values
+    __levels: OrderedDict[int, LevelType]
     __indicators: List[DailyIndicator]
 
     # TODO: Choose better values
@@ -225,7 +232,6 @@ class DailyAsset(ABC):
         return date_range
 
     def prepare_indicators(self, random_radius: Optional[int] = None):
-        self.__indicators = []
         highs = []
         lows = []
         closes = []
@@ -266,9 +272,10 @@ class DailyAsset(ABC):
         closes = pd.Series(closes)
         modified_closes: pd.Series
         if self.__LEVEL_PRICE_CHANGE is not None:
-            levels = _detect_complex_levels(closes, *self.__LEVEL_PRICE_CHANGE)
-            modified_closes = pd.Series(_smooth(closes, levels=levels))
+            self.__levels = _detect_complex_levels(closes, *self.__LEVEL_PRICE_CHANGE)
+            modified_closes = pd.Series(_smooth(closes, self.__levels))
         else:
+            self.__levels = OrderedDict()
             modified_closes = closes.copy()
         # Calculate indicators
         fast_emas = EMAIndicator(closes, window=self.__EMA_WINDOW_FAST).ema_indicator()
@@ -283,6 +290,7 @@ class DailyAsset(ABC):
             else:
                 modified_closes[i] = float("nan")
         # Store the indicators
+        self.__indicators = []
         for (candle, actual_close, modified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
             self.__candles, closes, modified_closes,
             fast_emas, slow_emas, rsis, adxs, ccis,
@@ -316,6 +324,7 @@ class DailyAsset(ABC):
         for i in range(len(indicators)):
             prices.append(DailyPrice(
                 indicators[i].date,
+                self.__levels.get(start_date_index + i, None),
                 indicators[i].actual_price,
                 indicators[i].modified_price,
                 # Features
@@ -551,9 +560,7 @@ def _detect_simple_levels(
     return levels
 
 
-def _smooth(prices: "pd.Series[float]", levels: Optional[OrderedDict[int, LevelType]] = None) -> np.ndarray:
-    if levels is None:
-        return prices
+def _smooth(prices: "pd.Series[float]", levels: OrderedDict[int, LevelType]) -> np.ndarray:
     # `0` means setting the derivative to zero at each level
     interpolate = BPoly.from_derivatives([i for i in levels], [[prices[i], 0] for i in levels])
     smoothed_prices = interpolate(np.arange(len(prices)))
