@@ -175,7 +175,9 @@ class DailyAsset(ABC):
     __indicators: List[DailyIndicator]
 
     # TODO: Choose better values
-    __LEVEL_PRICE_CHANGE: Optional[Tuple[Tuple[float, float], ...]] = None
+    __LEVEL_DETECTION_PRICE_CHANGE: Optional[Tuple[Tuple[float, float], ...]] = None
+    __LEVEL_CONCATENATION_DAYS_NUM: int = 0
+    __LEVEL_CONCATENATION_PRICE_DIFF = (0.0, 0.0)
     # NOTE: When adding a new hyperparameter to calculate historical and futuristic data,
     # remember to modify `calc_buffer_days_num` method
     __DELTA_DISTANCE = 1
@@ -271,8 +273,11 @@ class DailyAsset(ABC):
         lows = pd.Series(lows)
         closes = pd.Series(closes)
         modified_closes: pd.Series
-        if self.__LEVEL_PRICE_CHANGE is not None:
-            self.__levels = _detect_complex_levels(closes, *self.__LEVEL_PRICE_CHANGE)
+        if self.__LEVEL_DETECTION_PRICE_CHANGE is not None:
+            self.__levels = _detect_complex_levels(
+                closes, *self.__LEVEL_DETECTION_PRICE_CHANGE,
+                self.__LEVEL_CONCATENATION_DAYS_NUM, self.__LEVEL_CONCATENATION_PRICE_DIFF,
+            )
             modified_closes = pd.Series(_smooth(closes, self.__levels))
         else:
             self.__levels = OrderedDict()
@@ -378,9 +383,13 @@ class DailyAsset(ABC):
 
 def _detect_complex_levels(
     prices: "pd.Series[float]",
+    # For detecting levels
     major_price_change: Tuple[float, float],  # Ratio magnitude
     minor_price_change: Tuple[float, float],  # Ratio magnitude
     significant_price_change: Tuple[float, float],  # Ratio magnitude
+    # For concatenating levels
+    days_num: int,
+    price_diff: Tuple[float, float],  # Ratio magnitude
 ) -> OrderedDict[int, LevelType]:
     # Price change between levels
     major_support_change, major_resistance_change = major_price_change
@@ -442,6 +451,8 @@ def _detect_complex_levels(
             for minor_index, minor_level_type in minor_levels.items():
                 levels[major_index + minor_index] = minor_level_type
     levels[major_level_indices[-1]] = major_levels[major_level_indices[-1]]
+    # Concatenate levels
+    levels = _concatenate_levels(prices, levels, days_num, price_diff)
     return levels
 
 
@@ -558,6 +569,50 @@ def _detect_simple_levels(
         # If no levels are detected other than the initial one, clear the list of levels
         levels = OrderedDict()
     return levels
+
+
+def _concatenate_levels(
+    prices: "pd.Series[float]", levels: OrderedDict[int, LevelType],
+    days_num: int,  # Max number of days to be considered a short trend
+    price_diff: Tuple[float, float],  # Ratio magnitude
+) -> OrderedDict[int, LevelType]:
+    # Price diff between levels of the same type
+    support_diff, resistance_diff = price_diff
+    if (
+        support_diff < 0 or support_diff > 1
+        or resistance_diff < 0 or resistance_diff > 1
+    ):
+        # Must be in the range 0 to 1
+        raise ValueError
+    # Concatenate levels between short trends
+    concatenated_levels: OrderedDict[int, LevelType] = OrderedDict()
+    level_indices = list(levels.keys())
+    i = 0
+    while i < len(level_indices):
+        current_index = level_indices[i]
+        concatenated_levels[current_index] = levels[current_index]
+        j = i
+        # We check the difference between prices of consecutive levels of the same type,
+        # i.e., the current level and the second-next level, hence we use `+ 2` for their indices.
+        while j + 2 < len(level_indices):
+            second_next_index = level_indices[j + 2]
+            is_short_trend = second_next_index - current_index < days_num
+            same_level_type_price_diff = abs(prices[second_next_index] / prices[current_index] - 1)
+            if is_short_trend and (
+                # Price of the second-next level (which has the same level type) is not very different from the current level
+                (levels[current_index] == LevelType.SUPPORT and same_level_type_price_diff < support_diff)
+                or (levels[current_index] == LevelType.RESISTANCE and same_level_type_price_diff < resistance_diff)
+            ):
+                # Concatenate the next level and the second-next level with the current level, and move forward
+                j += 2
+            else:
+                break
+        # Move to the level after the second-next level
+        i = j + 1
+    if len(concatenated_levels) == 1:
+        # If all levels are concatenated into a single level, clear the list of levels
+        concatenated_levels = OrderedDict()
+    return concatenated_levels
 
 
 def _smooth(prices: "pd.Series[float]", levels: OrderedDict[int, LevelType]) -> np.ndarray:
