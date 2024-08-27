@@ -616,7 +616,9 @@ def _concatenate_levels(
 
 
 def _smooth(prices: "pd.Series[float]", levels: OrderedDict[int, LevelType]) -> np.ndarray:
+    # Treat the first and last prices as levels
+    level_indices = sorted(set(levels.keys()) | {0, len(prices) - 1})
     # `0` means setting the derivative to zero at each level
-    interpolate = BPoly.from_derivatives([i for i in levels], [[prices[i], 0] for i in levels])
+    interpolate = BPoly.from_derivatives(level_indices, [[prices[i], 0] for i in level_indices])
     smoothed_prices = interpolate(np.arange(len(prices)))
     return smoothed_prices
