@@ -176,8 +176,6 @@ class DailyAsset(ABC):
 
     # TODO: Choose better values
     __LEVEL_DETECTION_PRICE_CHANGE: Optional[Tuple[Tuple[float, float], ...]] = None
-    __LEVEL_CONCATENATION_WHIPSAW_DAYS_NUM: int = 0
-    __LEVEL_CONCATENATION_WHIPSAW_PRICE_DIFF = (0.0, 0.0)
     __LEVEL_CONCATENATION_PULLBACK_DAYS_NUM: int = 0
     # NOTE: When adding a new hyperparameter to calculate historical and futuristic data,
     # remember to modify `calc_buffer_days_num` method
@@ -277,7 +275,6 @@ class DailyAsset(ABC):
         if self.__LEVEL_DETECTION_PRICE_CHANGE is not None:
             self.__levels = _detect_complex_levels(
                 closes, *self.__LEVEL_DETECTION_PRICE_CHANGE,
-                self.__LEVEL_CONCATENATION_WHIPSAW_DAYS_NUM, self.__LEVEL_CONCATENATION_WHIPSAW_PRICE_DIFF,
                 self.__LEVEL_CONCATENATION_PULLBACK_DAYS_NUM,
             )
             modified_closes = pd.Series(_smooth(closes, self.__levels))
@@ -390,8 +387,6 @@ def _detect_complex_levels(
     minor_price_change: Tuple[float, float],  # Ratio magnitude
     significant_price_change: Tuple[float, float],  # Ratio magnitude
     # For concatenating levels
-    whipsaw_days_num: int,
-    whipsaw_price_diff: Tuple[float, float],  # Ratio magnitude
     pullback_days_num: int,
 ) -> OrderedDict[int, LevelType]:
     # Price change between levels
@@ -455,7 +450,7 @@ def _detect_complex_levels(
                 levels[major_index + minor_index] = minor_level_type
     levels[major_level_indices[-1]] = major_levels[major_level_indices[-1]]
     # Concatenate levels
-    levels = _concatenate_levels(prices, levels, whipsaw_days_num, whipsaw_price_diff, pullback_days_num)
+    levels = _concatenate_levels(levels, pullback_days_num)
     return levels
 
 
@@ -575,60 +570,24 @@ def _detect_simple_levels(
 
 
 def _concatenate_levels(
-    prices: "pd.Series[float]", levels: OrderedDict[int, LevelType],
-    whipsaw_days_num: int,  # Max number of days to be considered a short trend
-    whipsaw_price_diff: Tuple[float, float],  # Ratio magnitude
+    levels: OrderedDict[int, LevelType],
     pullback_days_num: int,  # Max number of days to be considered a short trend
 ) -> OrderedDict[int, LevelType]:
-    # Whipsaw price diff between levels of the same type
-    whipsaw_support_diff, whipsaw_resistance_diff = whipsaw_price_diff
-    if (
-        whipsaw_support_diff < 0 or whipsaw_support_diff > 1
-        or whipsaw_resistance_diff < 0 or whipsaw_resistance_diff > 1
-    ):
-        # Must be in the range 0 to 1
-        raise ValueError
-    # Concatenate whipsaw levels
-    whipsaw_concatenated_levels: OrderedDict[int, LevelType] = OrderedDict()
+    # Concatenate pullback levels
+    concatenated_levels: OrderedDict[int, LevelType] = OrderedDict()
     level_indices = list(levels.keys())
     i = 0
     while i < len(level_indices):
         current_index = level_indices[i]
-        whipsaw_concatenated_levels[current_index] = levels[current_index]
-        j = i
-        # We check the difference between prices of consecutive levels of the same type,
-        # i.e., the current level and the second-next level, hence we use `+ 2` for their indices.
-        while j + 2 < len(level_indices):
-            second_next_index = level_indices[j + 2]
-            is_short_trend = second_next_index - current_index < whipsaw_days_num
-            price_diff = abs(prices[second_next_index] / prices[current_index] - 1)
-            if is_short_trend and (
-                # Price of the second-next level (which has the same level type) is not very different from the current level
-                (levels[current_index] == LevelType.SUPPORT and price_diff < whipsaw_support_diff)
-                or (levels[current_index] == LevelType.RESISTANCE and price_diff < whipsaw_resistance_diff)
-            ):
-                # Concatenate the next level and the second-next level with the current level, and move forward
-                j += 2
-            else:
-                break
-        # Move to the level after the second-next level
-        i = j + 1
-    # Concatenate pullback levels
-    pullback_concatenated_levels: OrderedDict[int, LevelType] = OrderedDict()
-    level_indices = list(whipsaw_concatenated_levels.keys())
-    i = 0
-    while i < len(level_indices):
-        current_index = level_indices[i]
-        pullback_concatenated_levels[current_index] = whipsaw_concatenated_levels[current_index]
-        is_pullback = i + 1 < len(level_indices) and level_indices[i + 1] - current_index < pullback_days_num
-        if is_pullback:
-            # Skip the next level if it is at the end of a trend that is too short
-            i += 1
+        is_pullback = i > 0 and current_index - level_indices[i - 1] < pullback_days_num
+        if not is_pullback:
+            # Only consider the current level if it is not at the end of a trend that is too short
+            concatenated_levels[current_index] = levels[current_index]
         i += 1
-    if len(pullback_concatenated_levels) == 1:
+    if len(concatenated_levels) == 1:
         # If all levels are concatenated into a single level, clear the list of levels
-        pullback_concatenated_levels = OrderedDict()
-    return pullback_concatenated_levels
+        concatenated_levels = OrderedDict()
+    return concatenated_levels
 
 
 def _smooth(prices: "pd.Series[float]", levels: OrderedDict[int, LevelType]) -> np.ndarray:
