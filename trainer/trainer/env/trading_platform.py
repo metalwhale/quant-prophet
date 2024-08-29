@@ -427,7 +427,7 @@ class TradingPlatform(gym.Env):
             step += 1
         rendered = self.render() if rendering else None
         # Calculate the earning
-        calculated_earning, price_change, wl_rate = _calc_earning(
+        calculated_earning, price_change, wl_ratio = _calc_earning(
             self._positions, self._prices[-1],
             self._position_net_price_type,
         )
@@ -435,7 +435,7 @@ class TradingPlatform(gym.Env):
         platform_earning = self._extra_info.earning
         return (
             rendered,
-            (platform_earning, calculated_earning, price_change, wl_rate),
+            (platform_earning, calculated_earning, price_change, wl_ratio),
             (self._positions, self._prices[-1]),
         )
 
@@ -540,10 +540,10 @@ def _calc_position_net_ratio(position: Position, price: DailyPrice, price_type: 
 
 
 def _calc_earning(
-    positions: List[Position], final_price: DailyPrice,
+    positions: List[Position], last_price: DailyPrice,
     price_type: PriceType,
 ) -> Tuple[float, float, float]:
-    if len(positions) < 1 or positions[-1].date > final_price.date:
+    if len(positions) < 1 or positions[-1].date > last_price.date:
         return (0, 0, 0)
     earning = 0
     position_net_ratios: List[float] = []
@@ -556,18 +556,18 @@ def _calc_earning(
         price_change_ratios.append(cur_position.entry_price.actual_price / prev_position.entry_price.actual_price - 1)
         earning += prev_position.amount * position_net_ratio
     # Earning of the last position
-    last_position_net_ratio = _calc_position_net_ratio(positions[-1], final_price, price_type)
+    last_position_net_ratio = _calc_position_net_ratio(positions[-1], last_price, price_type)
     position_net_ratios.append(last_position_net_ratio)
-    price_change_ratios.append(final_price.actual_price / positions[-1].entry_price.actual_price - 1)
+    price_change_ratios.append(last_price.actual_price / positions[-1].entry_price.actual_price - 1)
     earning += positions[-1].amount * last_position_net_ratio
     # Price change equals a BUY position, hence `1` instead of `-1`
-    price_change = positions[0].amount * 1 * (final_price.actual_price / positions[0].entry_price.actual_price - 1)
-    # Win-lose rate
-    wl_rate = sum([
+    price_change = positions[0].amount * 1 * (last_price.actual_price / positions[0].entry_price.actual_price - 1)
+    # Win-lose ratio
+    wl_ratio = sum([
         # Position net ratios and price change ratios always have the same absolute value but differ in sign,
         # depending on the position type and whether the price is going up or down.
         1 if pnr > pcr else -1 if pnr < pcr else 0
         # Use `pnr if pnr != pcr else 0` to calculate average net ratio
         for pnr, pcr in zip(position_net_ratios, price_change_ratios)
     ]) / len(position_net_ratios)
-    return earning, price_change, wl_rate
+    return earning, price_change, wl_ratio

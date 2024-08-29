@@ -20,7 +20,7 @@ class FullEvalCallback(BaseCallback):
     _showing_image: bool
 
     _ep_count: int
-    _avg_overview_results: List[Dict[str, Any]]
+    _general_overview_results: List[Dict[str, Any]]
     _asset_overview_results: Dict[str, List[Dict[str, Any]]]
 
     _OVERVIEW_LOG_FILE_NAME = "overview.csv"
@@ -42,7 +42,7 @@ class FullEvalCallback(BaseCallback):
         # Initialization
         os.makedirs(output_path, exist_ok=True)
         self._ep_count = 0
-        self._avg_overview_results = []
+        self._general_overview_results = []
         self._asset_overview_results = defaultdict(list)
 
     def _on_training_start(self) -> None:
@@ -62,28 +62,29 @@ class FullEvalCallback(BaseCallback):
         return super()._on_training_end()
 
     def __eval_model(self):
-        avg_result: Dict[str, Any] = {"ep_count": self._ep_count}
+        general_result: Dict[str, Any] = {"ep_count": self._ep_count}
         asset_results: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"ep_count": self._ep_count})
         for env_name, env in self._envs.items():
             env.set_mode(False)  # Just in case
-            earning_discrepancy_sum = 0.0
-            wl_rate_sum = 0.0
+            earning_ratio_sum = 0.0
+            win_count = 0
             for symbol in env.asset_pool.symbols:
                 os.makedirs(self._output_path / symbol, exist_ok=True)
                 env.favorite_symbols = [symbol]
                 (
                     rendered,
-                    (_, earning, price_change, wl_rate),
+                    (_, earning, price_change, wl_ratio),
                     (positions, last_price),
                 ) = env.trade(
                     model=self.model,
                     action_diff_threshold=self._action_diff_threshold, stopping_when_done=False,
                 )
-                earning_discrepancy = self.__calc_earning_discrepancy(price_change, earning)
+                initial_amount = positions[0].amount
+                earning_ratio = (initial_amount + earning) / (initial_amount + price_change) - 1
                 asset_results[symbol] |= {
                     "ep_count": self._ep_count,
-                    f"{env_name}_earning_discrepancy": earning_discrepancy,
-                    f"{env_name}_wl_rate": wl_rate,
+                    f"{env_name}_earning_ratio": earning_ratio,
+                    f"{env_name}_wl_ratio": wl_ratio,
                 }
                 # Write trade positions
                 with open(self._output_path / symbol / f"trade_{env_name}_{self._ep_count}.csv", "w") as positions_file:
@@ -105,41 +106,44 @@ class FullEvalCallback(BaseCallback):
                 draw.text((60, 60), f"env={env_name}, episode={self._ep_count}:\n" + ", ".join([
                     f"earning={earning:.2f}",
                     f"price_change={price_change:.2f}",
-                    f"wl_rate={wl_rate:.2f}",
+                    f"wl_ratio={wl_ratio:.2f}",
                 ]), fill=(0, 0, 0), font_size=80)
                 if self._showing_image:
                     plt.close("all")
                     show_image(image)
                 image.save(self._output_path / symbol / f"trade_{env_name}_{self._ep_count}.png")
-                # For average overview
-                earning_discrepancy_sum += earning_discrepancy
-                wl_rate_sum += wl_rate
-            avg_result |= {
-                f"{env_name}_earning_discrepancy": earning_discrepancy_sum / len(env.asset_pool.symbols),
-                f"{env_name}_wl_rate": wl_rate_sum / len(env.asset_pool.symbols),
+                # For general overview
+                earning_ratio_sum += earning_ratio
+                win_count += 1 if earning_ratio >= 0 else 0
+            general_result |= {
+                f"{env_name}_earning_ratio": earning_ratio_sum / len(env.asset_pool.symbols),
+                f"{env_name}_win_rate": win_count / len(env.asset_pool.symbols),
             }
             env.favorite_symbols = None
         # Save overview results
         for symbol in set([s for e in self._envs.values() for s in e.asset_pool.symbols]):
             self.__save_overview_results(symbol, asset_results[symbol])
-        self.__save_overview_results(None, avg_result)
+        self.__save_overview_results(None, general_result)
 
     def __save_overview_results(self, asset_symbol: Optional[str], result: Dict[str, Any]):
         overview_results: List[Dict[str, Any]]
         overview_log_file_path: Path
         overview_chart_file_path: Path
-        if asset_symbol is None:
-            overview_results = self._avg_overview_results
+        wl_field_name: str
+        if asset_symbol is None:  # General
+            overview_results = self._general_overview_results
             overview_log_file_path = self._output_path / self._OVERVIEW_LOG_FILE_NAME
             overview_chart_file_path = self._output_path / self._OVERVIEW_CHART_FILE_NAME
+            wl_field_name = "win_rate"
         else:
             overview_results = self._asset_overview_results[asset_symbol]
             overview_log_file_path = self._output_path / asset_symbol / self._OVERVIEW_LOG_FILE_NAME
             overview_chart_file_path = self._output_path / asset_symbol / self._OVERVIEW_CHART_FILE_NAME
+            wl_field_name = "wl_ratio"
         # Write overview log
         overview_log_field_names = [
             "ep_count",
-            *[f for n in self._envs.keys() for f in [f"{n}_earning_discrepancy", f"{n}_wl_rate"]],
+            *[f for n in self._envs.keys() for f in [f"{n}_earning_ratio", f"{n}_{wl_field_name}"]],
         ]
         if not os.path.isfile(overview_log_file_path):
             with open(overview_log_file_path, "w") as overview_log_file:
@@ -160,23 +164,14 @@ class FullEvalCallback(BaseCallback):
             ep_counts = [r["ep_count"] for r in overview_results]
             axes.set_title(env_name)
             axes.plot(ep_counts, [0 for _ in overview_results], color="gray")
-            axes.plot(ep_counts, [r[f"{env_name}_earning_discrepancy"] for r in overview_results], color="blue")
-            axes.plot(ep_counts, [r[f"{env_name}_wl_rate"] for r in overview_results], color="orange")
+            axes.plot(ep_counts, [r[f"{env_name}_earning_ratio"] for r in overview_results], color="blue")
+            axes.plot(ep_counts, [r[f"{env_name}_{wl_field_name}"] for r in overview_results], color="orange")
         figure.canvas.draw()
         image = np.frombuffer(figure.canvas.tostring_rgb(), dtype=np.uint8) \
             .reshape(figure.canvas.get_width_height()[::-1] + (3,))
         if self._showing_image:
             plt.close("all")
         Image.fromarray(image).save(overview_chart_file_path)
-
-    @staticmethod
-    def __calc_earning_discrepancy(price_change: float, earning: float) -> float:
-        # Increase earning by the absolute value of it,
-        # plus double the absolute value of the price change if they have opposite signs.
-        magnitude = abs(earning) + (0 if earning * price_change >= 0 else 2 * abs(price_change))
-        magnitude_ratio = magnitude / abs(price_change) - 1
-        # Take into account the sign of the original earning value
-        return (1 if earning >= 0 else -1) * magnitude_ratio
 
 
 def show_image(image: Any):
