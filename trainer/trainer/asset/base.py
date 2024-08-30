@@ -96,8 +96,12 @@ class DailyIndicator:
 
 
 class LevelType(Enum):
+    # Basic level types
     SUPPORT = 0
     RESISTANCE = 1
+    # Pullback level types
+    SUPPORT_PULLBACK = 2
+    RESISTANCE_PULLBACK = 3
 
 
 class DailyPrice:
@@ -175,8 +179,9 @@ class DailyAsset(ABC):
     __indicators: List[DailyIndicator]
 
     # TODO: Choose better values
-    __LEVEL_DETECTION_PRICE_CHANGE: Optional[Tuple[Tuple[float, float], ...]] = None
-    __LEVEL_CONCATENATION_PULLBACK_DAYS_NUM: int = 0
+    __LEVEL_PRICE_CHANGE: Optional[Tuple[Tuple[float, float], ...]] = None
+    __LEVEL_PULLBACK_DAYS_NUM: int = 0
+    __LEVEL_PULLBACK_WEIGHT: float = 0.0
     # NOTE: When adding a new hyperparameter to calculate historical and futuristic data,
     # remember to modify `calc_buffer_days_num` method
     __DELTA_DISTANCE = 1
@@ -272,12 +277,12 @@ class DailyAsset(ABC):
         lows = pd.Series(lows)
         closes = pd.Series(closes)
         modified_closes: pd.Series
-        if self.__LEVEL_DETECTION_PRICE_CHANGE is not None:
-            self.__levels = _detect_complex_levels(
-                closes, *self.__LEVEL_DETECTION_PRICE_CHANGE,
-                self.__LEVEL_CONCATENATION_PULLBACK_DAYS_NUM,
+        if self.__LEVEL_PRICE_CHANGE is not None:
+            self.__levels = _detect_levels(
+                closes, *self.__LEVEL_PRICE_CHANGE,
+                self.__LEVEL_PULLBACK_DAYS_NUM,
             )
-            modified_closes = pd.Series(_smooth(closes, self.__levels))
+            modified_closes = pd.Series(_smooth(closes, self.__levels, self.__LEVEL_PULLBACK_WEIGHT))
         else:
             self.__levels = OrderedDict()
             modified_closes = closes.copy()
@@ -380,13 +385,13 @@ class DailyAsset(ABC):
         return self.__date_indices.get(date.strftime(self.__DATE_FORMAT))
 
 
-def _detect_complex_levels(
+def _detect_levels(
     prices: "pd.Series[float]",
-    # For detecting levels
+    # For detecting basic levels
     major_price_change: Tuple[float, float],  # Ratio magnitude
     minor_price_change: Tuple[float, float],  # Ratio magnitude
     significant_price_change: Tuple[float, float],  # Ratio magnitude
-    # For concatenating levels
+    # For detecting pullback levels
     pullback_days_num: int,
 ) -> OrderedDict[int, LevelType]:
     # Price change between levels
@@ -400,7 +405,7 @@ def _detect_complex_levels(
         # Must be in the range 0 to 1
         raise ValueError
     # Detect major levels
-    major_levels = _detect_simple_levels(prices, major_price_change)
+    major_levels = _detect_basic_levels(prices, major_price_change)
     if len(major_levels) == 0:
         return major_levels
     # Find trends with significant price change
@@ -424,7 +429,7 @@ def _detect_complex_levels(
                 raise ValueError
             # Detect minor levels
             trend_prices = prices[major_index:next_major_index + 1].copy().reset_index(drop=True)
-            minor_levels = _detect_simple_levels(
+            minor_levels = _detect_basic_levels(
                 trend_prices, price_change,
                 first_level_type=major_levels[next_major_index],
             )
@@ -449,8 +454,8 @@ def _detect_complex_levels(
             for minor_index, minor_level_type in minor_levels.items():
                 levels[major_index + minor_index] = minor_level_type
     levels[major_level_indices[-1]] = major_levels[major_level_indices[-1]]
-    # Concatenate levels
-    levels = _concatenate_levels(levels, pullback_days_num)
+    # Detect pullback levels
+    levels = _detect_pullback_levels(levels, pullback_days_num)
     return levels
 
 
@@ -490,7 +495,7 @@ def _detect_complex_levels(
 # The following function implements "Case 2" to always update both the last and second-last levels,
 # regardless of whether the last level is support or resistance.
 # According to the above argument, this is redundant, and we should add checking code to avoid unnecessary handling.
-def _detect_simple_levels(
+def _detect_basic_levels(
     prices: "pd.Series[float]",
     price_change: Tuple[float, float],  # Ratio magnitude
     first_level_type: LevelType = LevelType.SUPPORT,
@@ -569,31 +574,48 @@ def _detect_simple_levels(
     return levels
 
 
-def _concatenate_levels(
+# Pullback levels mark the end of short-term trends, appear within a longer trend but in the opposite direction,
+# denote a temporary reversal, and then return to the main trend shortly after.
+# NOTE: It's more accurate to define a pullback level as the start of a short-term trend rather than its end.
+# However, since the end level's price depends on both its own price and the previous level's price (ref: `_smooth` function),
+# it's simpler to view pullback levels as those where prices rely on other levels, i.e., the end levels.
+def _detect_pullback_levels(
     levels: OrderedDict[int, LevelType],
-    pullback_days_num: int,  # Max number of days to be considered a short trend
+    days_num: int,  # Max number of days to be considered a short-term trend
 ) -> OrderedDict[int, LevelType]:
-    # Concatenate pullback levels
-    concatenated_levels: OrderedDict[int, LevelType] = OrderedDict()
+    reformed_levels: OrderedDict[int, LevelType] = OrderedDict()
     level_indices = list(levels.keys())
     i = 0
     while i < len(level_indices):
         current_index = level_indices[i]
-        is_pullback = i > 0 and current_index - level_indices[i - 1] < pullback_days_num
-        if not is_pullback:
-            # Only consider the current level if it is not at the end of a trend that is too short
-            concatenated_levels[current_index] = levels[current_index]
+        is_pullback = i > 0 and current_index - level_indices[i - 1] < days_num
+        pullback_level_type: Optional[LevelType] = None
+        if is_pullback:
+            if levels[current_index] == LevelType.SUPPORT:
+                pullback_level_type = LevelType.SUPPORT_PULLBACK
+            else:
+                pullback_level_type = LevelType.RESISTANCE_PULLBACK
+        reformed_levels[current_index] = pullback_level_type or levels[current_index]
         i += 1
-    if len(concatenated_levels) == 1:
-        # If all levels are concatenated into a single level, clear the list of levels
-        concatenated_levels = OrderedDict()
-    return concatenated_levels
+    return reformed_levels
 
 
-def _smooth(prices: "pd.Series[float]", levels: OrderedDict[int, LevelType]) -> np.ndarray:
+def _smooth(
+    prices: "pd.Series[float]", levels: OrderedDict[int, LevelType],
+    pullback_weight: float,
+) -> np.ndarray:
     # Treat the first and last prices as levels
     level_indices = sorted(set(levels.keys()) | {0, len(prices) - 1})
-    # `0` means setting the derivative to zero at each level
-    interpolate = BPoly.from_derivatives(level_indices, [[prices[i], 0] for i in level_indices])
+    interpolate = BPoly.from_derivatives(level_indices, [[
+        # Value of basic level is the same as its price
+        prices[index] if (
+            i == 0 or index not in levels
+            or levels[index] == LevelType.SUPPORT or levels[index] == LevelType.RESISTANCE  # Basic levels
+        )
+        # Value of a pullback level is calculated using its own price and price of the previous level,
+        # ensuring that even after a short-term trend, the price doesn't change too much.
+        else pullback_weight * prices[index] + (1 - pullback_weight) * prices[level_indices[i - 1]],
+        0,  # Set the derivative to zero at each level
+    ] for i, index in enumerate(level_indices)])
     smoothed_prices = interpolate(np.arange(len(prices)))
     return smoothed_prices

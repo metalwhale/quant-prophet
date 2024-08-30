@@ -334,13 +334,14 @@ class TradingPlatform(gym.Env):
                 date_prices = [date_price]
             # Plot level
             if price.level_type is not None:
-                is_support = price.level_type == LevelType.SUPPORT
+                is_basic = price.level_type == LevelType.SUPPORT or price.level_type == LevelType.RESISTANCE
+                is_support = price.level_type == LevelType.SUPPORT or price.level_type == LevelType.SUPPORT_PULLBACK
                 padding = actual_prices_range * vertical_padding / price.actual_price
                 axes.plot(
                     price.date, price.actual_price * (1 + (-1 if is_support else 1) * padding),
                     color="green" if is_support else "red",
                     marker="^" if is_support else "v",
-                    markersize=0.5,
+                    alpha=1 if is_basic else 0.5, markersize=0.5,
                 )
         axes.plot(dates, [p.modified_price if p.date in dates else None for p in prices], alpha=0.5)
         # Plot features
