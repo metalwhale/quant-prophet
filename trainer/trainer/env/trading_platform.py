@@ -100,7 +100,6 @@ class TradingPlatform(gym.Env):
 
     # Control flags
     _randomizing: bool
-    _adding_noise: bool
     _position_net_price_type: PriceType
     _position_amount_type: AmountType
 
@@ -441,7 +440,6 @@ class TradingPlatform(gym.Env):
 
     def set_mode(self, is_training: bool):
         self._randomizing = is_training
-        self._adding_noise = is_training
         self._position_net_price_type = PriceType.MODIFIED if is_training else PriceType.ACTUAL
         self._position_amount_type = AmountType.UNIT if is_training else AmountType.SPOT
 
@@ -469,35 +467,10 @@ class TradingPlatform(gym.Env):
 
     def _obtain_observation(self) -> Dict[str, Any]:
         # Observation for historical features
-        # TODO: Choose better conditions and noise values
-        historical_ema_diff_ratios = [
-            p.ema_diff_ratio if (
-                not self._adding_noise
-                or abs(p.ema_diff_ratio) >= 0.0 or np.random.uniform() >= 0.0  # Noise conditions
-            ) else 0  # Noise value
-            for p in self._prices
-        ]
-        historical_scaled_rsis = [
-            p.scaled_rsi if (
-                not self._adding_noise
-                or abs(p.scaled_rsi - 0.5) >= 0.0 or np.random.uniform() >= 0.0  # Noise conditions
-            ) else 0.5  # Noise value
-            for p in self._prices
-        ]
-        historical_scaled_adxs = [
-            p.scaled_adx if (
-                not self._adding_noise
-                or abs(p.scaled_adx - 0.5) >= 0.0 or np.random.uniform() >= 0.0  # Noise conditions
-            ) else 0.5  # Noise value
-            for p in self._prices
-        ]
-        historical_scaled_ccis = [
-            p.scaled_cci if (
-                not self._adding_noise
-                or abs(p.scaled_cci) >= 0.0 or np.random.uniform() >= 0.0  # Noise conditions
-            ) else 0  # Noise value
-            for p in self._prices
-        ]
+        historical_ema_diff_ratios = [p.ema_diff_ratio for p in self._prices]
+        historical_scaled_rsis = [p.scaled_rsi for p in self._prices]
+        historical_scaled_adxs = [p.scaled_adx for p in self._prices]
+        historical_scaled_ccis = [p.scaled_cci for p in self._prices]
         # Observation for the last position
         last_position_type: PositionType = PositionType(
             # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL

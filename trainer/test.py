@@ -13,7 +13,6 @@ def test_earning_calculation() -> bool:
     asset_pool.apply_date_range((None, None), HISTORICAL_DAYS_NUM)
     env = TradingPlatform(asset_pool, HISTORICAL_DAYS_NUM)
     env._randomizing = True
-    env._adding_noise = False
     for i in range(1000):
         if i % 100 == 0:
             print(i)
