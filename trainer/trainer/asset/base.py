@@ -282,7 +282,10 @@ class DailyAsset(ABC):
                 closes, *self.__LEVEL_PRICE_CHANGE,
                 self.__LEVEL_PULLBACK_DAYS_NUM,
             )
-            modified_closes = pd.Series(_smooth(closes, self.__levels, self.__LEVEL_PULLBACK_WEIGHT))
+            modified_closes = pd.Series(_smooth(
+                closes, self.__levels,
+                self.__LEVEL_PULLBACK_DAYS_NUM, self.__LEVEL_PULLBACK_WEIGHT,
+            ))
         else:
             self.__levels = OrderedDict()
             modified_closes = closes.copy()
@@ -602,20 +605,31 @@ def _detect_pullback_levels(
 
 def _smooth(
     prices: "pd.Series[float]", levels: OrderedDict[int, LevelType],
-    pullback_weight: float,
+    pullback_days_num: int, pullback_weight: float,
 ) -> np.ndarray:
     # Treat the first and last prices as levels
     level_indices = sorted(set(levels.keys()) | {0, len(prices) - 1})
-    interpolate = BPoly.from_derivatives(level_indices, [[
-        # Value of basic level is the same as its price
-        prices[index] if (
+    # Prepare the prices for all levels
+    pullback_prices: Dict[int, float] = {}
+    derivatives: List[float] = []
+    for i, index in enumerate(level_indices):
+        level_price: float
+        if (
             i == 0 or index not in levels
             or levels[index] == LevelType.SUPPORT or levels[index] == LevelType.RESISTANCE  # Basic levels
-        )
-        # Value of a pullback level is calculated using its own price and price of the previous level,
-        # ensuring that even after a short-term trend, the price doesn't change too much.
-        else pullback_weight * prices[index] + (1 - pullback_weight) * prices[level_indices[i - 1]],
-        0,  # Set the derivative to zero at each level
-    ] for i, index in enumerate(level_indices)])
+        ):
+            # Price of basic level is the same as its price
+            level_price = prices[index]
+        else:  # Pullback levels
+            prev_index = level_indices[i - 1]
+            # Adjust the weight based on the number of days from the previous trend
+            weight = pullback_weight * (index - prev_index) / pullback_days_num
+            # Price of a pullback level is calculated using its own price and price of the previous level,
+            # ensuring that even after a short-term trend, the price doesn't change too much.
+            prev_level_price = pullback_prices[prev_index] if prev_index in pullback_prices else prices[prev_index]
+            level_price = weight * prices[index] + (1 - weight) * prev_level_price
+            pullback_prices[index] = level_price
+        derivatives.append([level_price, 0])  # Set the derivative to zero at each level
+    interpolate = BPoly.from_derivatives(level_indices, derivatives)
     smoothed_prices = interpolate(np.arange(len(prices)))
     return smoothed_prices
