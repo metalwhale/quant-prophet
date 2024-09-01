@@ -190,7 +190,6 @@ class DailyAsset(ABC):
     __RSI_WINDOW = 14
     __ADX_WINDOW = 14
     __CCI_WINDOW = 20
-    __RETRACTION_DISTANCE = 0
 
     __DATE_FORMAT = "%Y-%m-%d"
 
@@ -295,12 +294,6 @@ class DailyAsset(ABC):
         rsis = RSIIndicator(closes, window=self.__RSI_WINDOW).rsi()
         adxs = ADXIndicator(highs, lows, closes, window=self.__ADX_WINDOW).adx()
         ccis = CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci()
-        # Retract the modified closes by a specific distance into the past
-        for i in reversed(range(len(modified_closes))):
-            if i - self.__RETRACTION_DISTANCE >= 0:
-                modified_closes[i] = modified_closes[i - self.__RETRACTION_DISTANCE]
-            else:
-                modified_closes[i] = float("nan")
         # Store the indicators
         self.__indicators = []
         for (candle, actual_close, modified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
@@ -357,7 +350,6 @@ class DailyAsset(ABC):
             cls.__RSI_WINDOW - 1,  # For first `nan`s of RSIs
             cls.__ADX_WINDOW * 2 - 1,  # For first `0`s of ADXs
             cls.__CCI_WINDOW - 1,  # For first `nan`s of CCIs
-            cls.__RETRACTION_DISTANCE,  # For first `nan`s of modified closes
         )
         futuristic_buffer_days_num = 0
         return historical_buffer_days_num, futuristic_buffer_days_num
