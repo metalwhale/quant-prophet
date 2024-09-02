@@ -181,6 +181,7 @@ class DailyAsset(ABC):
 
     # TODO: Choose better values
     __LEVEL_BASIC_PRICE_CHANGE: Optional[Tuple[float, float]] = None
+    __LEVEL_PREEMPTIVE_REALIZATION_TARGET: float = 1.0
     __LEVEL_PULLBACK_DAYS_NUM: int = 0
     __LEVEL_PULLBACK_WEIGHT: float = 0.0
     # NOTE: When adding a new hyperparameter to calculate historical and futuristic data,
@@ -284,7 +285,12 @@ class DailyAsset(ABC):
         closes = pd.Series(closes)
         modified_closes: pd.Series
         if self.__LEVEL_BASIC_PRICE_CHANGE is not None:
-            self.__levels = _detect_levels(closes, self.__LEVEL_BASIC_PRICE_CHANGE, self.__LEVEL_PULLBACK_DAYS_NUM)
+            self.__levels = _detect_levels(
+                closes,
+                self.__LEVEL_BASIC_PRICE_CHANGE,
+                self.__LEVEL_PREEMPTIVE_REALIZATION_TARGET,
+                self.__LEVEL_PULLBACK_DAYS_NUM,
+            )
             modified_closes = pd.Series(_smooth(
                 closes, self.__levels,
                 self.__LEVEL_PULLBACK_DAYS_NUM, self.__LEVEL_PULLBACK_WEIGHT,
@@ -386,15 +392,16 @@ class DailyAsset(ABC):
 
 def _detect_levels(
     prices: "pd.Series[float]",
-    # For detecting basic levels
     basic_price_change: Tuple[float, float],
-    # For detecting pullback levels
+    preemptive_realization_target: float,
     pullback_days_num: int,
 ) -> OrderedDict[int, LevelType]:
     # Detect basic levels
     levels = _detect_basic_levels(prices, basic_price_change)
     if len(levels) == 0:
         return levels
+    # Detect preemptive levels
+    levels = _detect_preemptive_levels(prices, levels, preemptive_realization_target)
     # Detect pullback levels
     levels = _detect_pullback_levels(levels, pullback_days_num)
     return levels
@@ -513,6 +520,28 @@ def _detect_basic_levels(
         # If no levels are detected other than the initial one, clear the list of levels
         levels = OrderedDict()
     return levels
+
+
+# Preemptive levels have prices that are near, but occur before the actual basic levels.
+# Finding them allows us to close a position earlier, rather than risking waiting until the trend has truly ended.
+def _detect_preemptive_levels(
+    prices: "pd.Series[float]", levels: OrderedDict[int, LevelType],
+    realization_target: float,
+) -> OrderedDict[int, LevelType]:
+    reformed_levels: OrderedDict[int, LevelType] = OrderedDict()
+    level_indices = list(levels.keys())
+    reformed_levels[level_indices[0]] = levels[level_indices[0]]  # Don't need to detect the first preemptive level
+    for prev_index, index in zip(level_indices[:-1], level_indices[1:]):
+        # We detect preemptive levels before pullback levels, so we don't need to handle pullback level types
+        is_support = levels[index] == LevelType.SUPPORT
+        target_price = prices[prev_index] + realization_target * (prices[index] - prices[prev_index])
+        preemptive_index: Optional[int] = None
+        for i, price in enumerate(prices[prev_index:index + 1]):
+            if (is_support and price <= target_price) or (not is_support and price >= target_price):
+                preemptive_index = prev_index + i
+                break
+        reformed_levels[preemptive_index or index] = levels[index]
+    return reformed_levels
 
 
 # Pullback levels mark the end of short-term trends, appear within a longer trend but in the opposite direction,
