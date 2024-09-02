@@ -177,6 +177,7 @@ class DailyAsset(ABC):
     # Recalculated when preparing indicator values
     __levels: OrderedDict[int, LevelType]
     __indicators: List[DailyIndicator]
+    __prev_random_radius: Optional[float]
 
     # TODO: Choose better values
     __LEVEL_BASIC_PRICE_CHANGE: Optional[Tuple[float, float]] = None
@@ -195,6 +196,8 @@ class DailyAsset(ABC):
 
     def __init__(self, symbol: str) -> None:
         self.__symbol = symbol
+        self.__indicators = []
+        self.__prev_random_radius = None
 
     # Find the widest date range that matches the following conditions:
     # - Chosen from the days of `self.__candles`
@@ -237,6 +240,10 @@ class DailyAsset(ABC):
         return date_range
 
     def prepare_indicators(self, random_radius: Optional[int] = None):
+        if random_radius is None and self.__prev_random_radius is None and len(self.__indicators) != 0:
+            # Don’t need to prepare the indicators again if we’ve already done it with the random radius set to none
+            return
+        self.__prev_random_radius = random_radius
         highs = []
         lows = []
         closes = []
