@@ -10,7 +10,7 @@ from matplotlib.axes import Axes
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3 import DQN
 
-from ..asset.base import DailyAsset, DailyPrice, LevelType
+from ..asset.base import DailyAsset, DailyPrice
 from .asset_pool import AssetPool
 
 
@@ -323,14 +323,14 @@ class TradingPlatform(gym.Env):
                 date_prices = [date_price]
             # Plot level
             if price.level_type is not None:
-                is_basic = price.level_type == LevelType.SUPPORT or price.level_type == LevelType.RESISTANCE
-                is_support = price.level_type == LevelType.SUPPORT or price.level_type == LevelType.SUPPORT_PULLBACK
+                is_princial = price.level_type.is_principal
+                is_support = price.level_type.is_support
                 padding = actual_prices_range * vertical_padding / price.actual_price
                 axes.plot(
                     price.date, price.actual_price * (1 + (-1 if is_support else 1) * padding),
                     color="green" if is_support else "red",
                     marker="^" if is_support else "v",
-                    alpha=1 if is_basic else 0.5, markersize=0.5,
+                    alpha=1 if is_princial else 0.5, markersize=0.5,
                 )
         axes.plot(dates, [p.modified_price if p.date in dates else None for p in prices], alpha=0.5)
         # Plot features

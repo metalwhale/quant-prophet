@@ -96,12 +96,36 @@ class DailyIndicator:
 
 
 class LevelType(Enum):
+    _is_principal: bool
+    _is_support: bool
+
     # Basic level types
-    SUPPORT = 0
-    RESISTANCE = 1
+    SUPPORT = 0, True, True
+    RESISTANCE = 1, True, False
+    # Preemptive level types
+    SUPPORT_PREEMPTIVE = 2, True, True
+    RESISTANCE_PREEMPTIVE = 3, True, False
     # Pullback level types
-    SUPPORT_PULLBACK = 2
-    RESISTANCE_PULLBACK = 3
+    SUPPORT_PULLBACK = 4, False, True
+    RESISTANCE_PULLBACK = 5, False, False
+
+    # LINK: See: https://stackoverflow.com/a/54732120
+    def __new__(cls, *args) -> "LevelType":
+        obj = object.__new__(cls)
+        obj._value_ = args[0]
+        return obj
+
+    def __init__(self, _: int, is_principal: bool, is_support: bool) -> None:
+        self._is_principal = is_principal
+        self._is_support = is_support
+
+    @property
+    def is_principal(self) -> bool:
+        return self._is_principal
+
+    @property
+    def is_support(self) -> bool:
+        return self._is_support
 
 
 class DailyPrice:
@@ -532,15 +556,18 @@ def _detect_preemptive_levels(
     level_indices = list(levels.keys())
     reformed_levels[level_indices[0]] = levels[level_indices[0]]  # Don't need to detect the first preemptive level
     for prev_index, index in zip(level_indices[:-1], level_indices[1:]):
-        # We detect preemptive levels before pullback levels, so we don't need to handle pullback level types
-        is_support = levels[index] == LevelType.SUPPORT
+        is_support = levels[index].is_support
         target_price = prices[prev_index] + realization_target * (prices[index] - prices[prev_index])
         preemptive_index: Optional[int] = None
         for i, price in enumerate(prices[prev_index:index + 1]):
             if (is_support and price <= target_price) or (not is_support and price >= target_price):
                 preemptive_index = prev_index + i
                 break
-        reformed_levels[preemptive_index or index] = levels[index]
+        if preemptive_index is not None:
+            reformed_levels[preemptive_index] = LevelType.SUPPORT_PREEMPTIVE if is_support \
+                else LevelType.RESISTANCE_PREEMPTIVE
+        else:
+            reformed_levels[index] = levels[index]
     return reformed_levels
 
 
@@ -561,7 +588,7 @@ def _detect_pullback_levels(
         is_pullback = i > 0 and current_index - level_indices[i - 1] < days_num
         pullback_level_type: Optional[LevelType] = None
         if is_pullback:
-            if levels[current_index] == LevelType.SUPPORT:
+            if levels[current_index].is_support:
                 pullback_level_type = LevelType.SUPPORT_PULLBACK
             else:
                 pullback_level_type = LevelType.RESISTANCE_PULLBACK
@@ -581,11 +608,8 @@ def _smooth(
     derivatives: List[float] = []
     for i, index in enumerate(level_indices):
         level_price: float
-        if (
-            i == 0 or index not in levels
-            or levels[index] == LevelType.SUPPORT or levels[index] == LevelType.RESISTANCE  # Basic levels
-        ):
-            # Price of basic level is the same as its price
+        if i == 0 or index not in levels or levels[index].is_principal:
+            # Price of principal level is the same as its price
             level_price = prices[index]
         else:  # Pullback levels
             prev_index = level_indices[i - 1]
