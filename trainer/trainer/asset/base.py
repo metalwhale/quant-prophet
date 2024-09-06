@@ -204,7 +204,7 @@ class DailyAsset(ABC):
     __prev_random_radius: Optional[float]
 
     # TODO: Choose better values
-    __LEVEL_BASIC_PRICE_CHANGE: Optional[Tuple[float, float]] = None
+    __LEVEL_BASIC_PRICE_CHANGE: Optional[Tuple[Tuple[float, float], ...]] = None
     __LEVEL_PREEMPTIVE_REALIZATION_TARGET: float = 1.0
     __LEVEL_PULLBACK_DAYS_NUM: int = 0
     __LEVEL_PULLBACK_WEIGHT: float = 0.0
@@ -416,14 +416,17 @@ class DailyAsset(ABC):
 
 def _detect_levels(
     prices: "pd.Series[float]",
-    basic_price_change: Tuple[float, float],
+    basic_price_change: Tuple[Tuple[float, float], ...],
     preemptive_realization_target: float,
     pullback_days_num: int,
 ) -> OrderedDict[int, LevelType]:
-    # Detect basic levels
-    levels = _detect_basic_levels(prices, basic_price_change)
+    # Detect basic major levels
+    major_price_change, *_ = basic_price_change
+    levels = _detect_basic_levels(prices, major_price_change)
     if len(levels) == 0:
         return levels
+    # Detect basic minor levels
+    levels = _detect_basic_minor_levels(prices, levels, *basic_price_change)
     # Detect preemptive levels
     levels = _detect_preemptive_levels(prices, levels, preemptive_realization_target)
     # Detect pullback levels
@@ -544,6 +547,79 @@ def _detect_basic_levels(
         # If no levels are detected other than the initial one, clear the list of levels
         levels = OrderedDict()
     return levels
+
+
+# Minor levels are basic levels like major levels, but we detect them only in long-term trends with significant price changes
+def _detect_basic_minor_levels(
+    prices: "pd.Series[float]", major_levels: OrderedDict[int, LevelType],
+    major_price_change: Tuple[float, float],  # Ratio magnitude
+    minor_price_change: Tuple[float, float],  # Ratio magnitude
+    significant_price_change: Tuple[float, float],  # Ratio magnitude
+) -> OrderedDict[int, LevelType]:
+    # Price change between levels
+    major_support_change, major_resistance_change = major_price_change
+    minor_support_change, minor_resistance_change = minor_price_change
+    significant_support_change, significant_resistance_change = significant_price_change
+    if (
+        significant_support_change < 0 or significant_support_change > 1
+        or significant_resistance_change < 0 or significant_resistance_change > 1
+    ):
+        # Must be in the range 0 to 1
+        raise ValueError
+    # Find trends with significant price change
+    reformed_levels: OrderedDict[int, LevelType] = OrderedDict()
+    major_level_indices = list(major_levels.keys())
+    for major_index, next_major_index in zip(major_level_indices[:-1], major_level_indices[1:]):
+        reformed_levels[major_index] = major_levels[major_index]
+        # Since minor levels should be detected right after major levels,
+        # we only have two basic level types (SUPPORT and RESISTANCE) and no other non-basic level types.
+        is_significant_trend = (
+            # Uptrend
+            major_levels[major_index] == LevelType.SUPPORT
+            and prices[next_major_index] / prices[major_index] >= 1 + significant_resistance_change
+        ) or (
+            # Downtrend
+            major_levels[major_index] == LevelType.RESISTANCE
+            and prices[next_major_index] / prices[major_index] <= 1 - significant_support_change
+        )
+        # Only consider trends with significant price changes
+        if not is_significant_trend:
+            continue
+        price_change: Tuple[float, float]
+        if major_levels[major_index] == LevelType.SUPPORT:
+            price_change = (minor_support_change, major_resistance_change)
+        elif major_levels[major_index] == LevelType.RESISTANCE:
+            price_change = (major_support_change, minor_resistance_change)
+        else:
+            raise ValueError
+        # Detect minor levels
+        trend_prices = prices[major_index:next_major_index + 1].copy().reset_index(drop=True)
+        minor_levels = _detect_basic_levels(
+            trend_prices, price_change,
+            first_level_type=major_levels[next_major_index],
+        )
+        if (
+            # The first minor level, if detected, must have the same type as the major level that starts this trend
+            0 in minor_levels
+            and minor_levels[0] != major_levels[major_index]
+        ) or (
+            # The last minor level, if detected, must have the same type as the major level that ends this trend
+            len(trend_prices) - 1 in minor_levels
+            and minor_levels[len(trend_prices) - 1] != major_levels[next_major_index]
+        ):
+            raise Exception
+        minor_level_indices = list(minor_levels.keys())
+        if len(minor_level_indices) > 0 and 0 not in minor_levels:
+            # Skip the first minor levels if the first price change is insufficient
+            minor_levels.pop(minor_level_indices[0])
+            minor_levels.pop(minor_level_indices[1])
+            # We don't skip the last minor levels because, in a trend with significant price changes,
+            # they are nearly the same price as the last date of the trend.
+            # Detecting them helps us take profit earlier rather than waiting until the last date.
+        for minor_index, minor_level_type in minor_levels.items():
+            reformed_levels[major_index + minor_index] = minor_level_type
+    reformed_levels[major_level_indices[-1]] = major_levels[major_level_indices[-1]]
+    return reformed_levels
 
 
 # Preemptive levels have prices that are near, but occur before the actual basic levels.
