@@ -193,13 +193,30 @@ class DailyPrice:
         return self._scaled_cci
 
 
+class Level:
+    _price: float
+    _level_type: LevelType
+
+    def __init__(self, price: float, level_type: LevelType) -> None:
+        self._price = price
+        self._level_type = level_type
+
+    @property
+    def price(self) -> float:
+        return self._price
+
+    @property
+    def level_type(self) -> LevelType:
+        return self._level_type
+
+
 class DailyAsset(ABC):
     __symbol: str
     # Initialized only once
     __candles: List[DailyCandle]
     __date_indices: Dict[str, int]
     # Recalculated when preparing indicator values
-    __levels: OrderedDict[int, LevelType]
+    __levels: OrderedDict[int, Level]
     __indicators: List[DailyIndicator]
     __prev_random_radius: Optional[float]
 
@@ -313,12 +330,9 @@ class DailyAsset(ABC):
                 closes,
                 self.__LEVEL_BASIC_PRICE_CHANGE,
                 self.__LEVEL_PREEMPTIVE_REALIZATION_TARGET,
-                self.__LEVEL_PULLBACK_DAYS_NUM,
-            )
-            modified_closes = pd.Series(_smooth(
-                closes, self.__levels,
                 self.__LEVEL_PULLBACK_DAYS_NUM, self.__LEVEL_PULLBACK_WEIGHT,
-            ))
+            )
+            modified_closes = pd.Series(_smooth(closes, self.__levels))
         else:
             self.__levels = OrderedDict()
             modified_closes = closes.copy()
@@ -363,7 +377,7 @@ class DailyAsset(ABC):
         for i in range(len(indicators)):
             prices.append(DailyPrice(
                 indicators[i].date,
-                self.__levels.get(start_date_index + i, None),
+                self.__levels[start_date_index + i].level_type if start_date_index + i in self.__levels else None,
                 indicators[i].actual_price,
                 indicators[i].modified_price,
                 # Features
@@ -418,8 +432,8 @@ def _detect_levels(
     prices: "pd.Series[float]",
     basic_price_change: Tuple[Tuple[float, float], ...],
     preemptive_realization_target: float,
-    pullback_days_num: int,
-) -> OrderedDict[int, LevelType]:
+    pullback_days_num: int, pullback_weight: float,
+) -> OrderedDict[int, Level]:
     # Detect basic major levels
     major_price_change, *_ = basic_price_change
     levels = _detect_basic_levels(prices, major_price_change)
@@ -430,7 +444,7 @@ def _detect_levels(
     # Detect preemptive levels
     levels = _detect_preemptive_levels(prices, levels, preemptive_realization_target)
     # Detect pullback levels
-    levels = _detect_pullback_levels(levels, pullback_days_num)
+    levels = _detect_pullback_levels(prices, levels, pullback_days_num, pullback_weight)
     return levels
 
 
@@ -474,7 +488,7 @@ def _detect_basic_levels(
     prices: "pd.Series[float]",
     price_change: Tuple[float, float],  # Ratio magnitude
     first_level_type: LevelType = LevelType.SUPPORT,
-) -> OrderedDict[int, LevelType]:
+) -> OrderedDict[int, Level]:
     # Price change between levels
     support_change, resistance_change = price_change
     if (
@@ -484,17 +498,17 @@ def _detect_basic_levels(
         # Must be in the range 0 to 1
         raise ValueError
     # Detect levels
-    levels: OrderedDict[int, LevelType] = OrderedDict()
+    levels: OrderedDict[int, Level] = OrderedDict()
     index = 0
-    levels[index] = first_level_type
+    levels[index] = Level(prices[index], first_level_type)
     while index < len(prices) - 1:
         index += 1
         last1_level_index = list(levels.keys())[-1]
         last2_level_index = list(levels.keys())[-2] if len(levels) >= 2 else None
-        if levels[last1_level_index] == LevelType.SUPPORT:
+        if levels[last1_level_index].level_type == LevelType.SUPPORT:
             # Case 1: Add a new resistance level if its price is higher than the last support level by a specified ratio
             if prices[index] / prices[last1_level_index] >= 1 + resistance_change:
-                levels[index] = LevelType.RESISTANCE
+                levels[index] = Level(prices[index], LevelType.RESISTANCE)
             # Case 2: Update the last support level if the new price is lower
             elif prices[index] / prices[last1_level_index] <= 1:
                 levels.pop(last1_level_index)
@@ -509,18 +523,18 @@ def _detect_basic_levels(
                     if prices[highest_index] / prices[last2_level_index] >= 1:
                         levels.pop(last2_level_index)
                         last2_level_index = highest_index
-                        levels[last2_level_index] = LevelType.RESISTANCE
+                        levels[last2_level_index] = Level(prices[last2_level_index], LevelType.RESISTANCE)
                 else:
                     # Add the highest price as a second-last resistance level, preceding the last support level
                     if prices[index] / prices[highest_index] <= 1 - support_change:
                         last2_level_index = highest_index
-                        levels[last2_level_index] = LevelType.RESISTANCE
+                        levels[last2_level_index] = Level(prices[last2_level_index], LevelType.RESISTANCE)
                 # Update the last support level
-                levels[index] = LevelType.SUPPORT
-        elif levels[last1_level_index] == LevelType.RESISTANCE:
+                levels[index] = Level(prices[index], LevelType.SUPPORT)
+        elif levels[last1_level_index].level_type == LevelType.RESISTANCE:
             # Case 1: Add a new support level if its price is lower than the last resistance level by a specified ratio
             if prices[index] / prices[last1_level_index] <= 1 - support_change:
-                levels[index] = LevelType.SUPPORT
+                levels[index] = Level(prices[index], LevelType.SUPPORT)
             # Case 2: Update the last resistance level if the new price is higher
             elif prices[index] / prices[last1_level_index] >= 1:
                 levels.pop(last1_level_index)
@@ -535,14 +549,14 @@ def _detect_basic_levels(
                     if prices[lowest_index] / prices[last2_level_index] <= 1:
                         levels.pop(last2_level_index)
                         last2_level_index = lowest_index
-                        levels[last2_level_index] = LevelType.SUPPORT
+                        levels[last2_level_index] = Level(prices[last2_level_index], LevelType.SUPPORT)
                 else:
                     # Add the lowest price as a second-last support level, preceding the last resistance level
                     if prices[index] / prices[lowest_index] >= 1 + resistance_change:
                         last2_level_index = lowest_index
-                        levels[last2_level_index] = LevelType.SUPPORT
+                        levels[last2_level_index] = Level(prices[last2_level_index], LevelType.SUPPORT)
                 # Update the last resistance level
-                levels[index] = LevelType.RESISTANCE
+                levels[index] = Level(prices[index], LevelType.RESISTANCE)
     if len(levels) == 1:
         # If no levels are detected other than the initial one, clear the list of levels
         levels = OrderedDict()
@@ -551,11 +565,11 @@ def _detect_basic_levels(
 
 # Minor levels are basic levels like major levels, but we detect them only in long-term trends with significant price changes
 def _detect_basic_minor_levels(
-    prices: "pd.Series[float]", major_levels: OrderedDict[int, LevelType],
+    prices: "pd.Series[float]", major_levels: OrderedDict[int, Level],
     major_price_change: Tuple[float, float],  # Ratio magnitude
     minor_price_change: Tuple[float, float],  # Ratio magnitude
     significant_price_change: Tuple[float, float],  # Ratio magnitude
-) -> OrderedDict[int, LevelType]:
+) -> OrderedDict[int, Level]:
     # Price change between levels
     major_support_change, major_resistance_change = major_price_change
     minor_support_change, minor_resistance_change = minor_price_change
@@ -567,7 +581,7 @@ def _detect_basic_minor_levels(
         # Must be in the range 0 to 1
         raise ValueError
     # Find trends with significant price change
-    reformed_levels: OrderedDict[int, LevelType] = OrderedDict()
+    reformed_levels: OrderedDict[int, Level] = OrderedDict()
     major_level_indices = list(major_levels.keys())
     for major_index, next_major_index in zip(major_level_indices[:-1], major_level_indices[1:]):
         reformed_levels[major_index] = major_levels[major_index]
@@ -575,20 +589,20 @@ def _detect_basic_minor_levels(
         # we only have two basic level types (SUPPORT and RESISTANCE) and no other non-basic level types.
         is_significant_trend = (
             # Uptrend
-            major_levels[major_index] == LevelType.SUPPORT
+            major_levels[major_index].level_type == LevelType.SUPPORT
             and prices[next_major_index] / prices[major_index] >= 1 + significant_resistance_change
         ) or (
             # Downtrend
-            major_levels[major_index] == LevelType.RESISTANCE
+            major_levels[major_index].level_type == LevelType.RESISTANCE
             and prices[next_major_index] / prices[major_index] <= 1 - significant_support_change
         )
         # Only consider trends with significant price changes
         if not is_significant_trend:
             continue
         price_change: Tuple[float, float]
-        if major_levels[major_index] == LevelType.SUPPORT:
+        if major_levels[major_index].level_type == LevelType.SUPPORT:
             price_change = (minor_support_change, major_resistance_change)
-        elif major_levels[major_index] == LevelType.RESISTANCE:
+        elif major_levels[major_index].level_type == LevelType.RESISTANCE:
             price_change = (major_support_change, minor_resistance_change)
         else:
             raise ValueError
@@ -596,16 +610,16 @@ def _detect_basic_minor_levels(
         trend_prices = prices[major_index:next_major_index + 1].copy().reset_index(drop=True)
         minor_levels = _detect_basic_levels(
             trend_prices, price_change,
-            first_level_type=major_levels[next_major_index],
+            first_level_type=major_levels[next_major_index].level_type,
         )
         if (
             # The first minor level, if detected, must have the same type as the major level that starts this trend
             0 in minor_levels
-            and minor_levels[0] != major_levels[major_index]
+            and minor_levels[0].level_type != major_levels[major_index].level_type
         ) or (
             # The last minor level, if detected, must have the same type as the major level that ends this trend
             len(trend_prices) - 1 in minor_levels
-            and minor_levels[len(trend_prices) - 1] != major_levels[next_major_index]
+            and minor_levels[len(trend_prices) - 1].level_type != major_levels[next_major_index].level_type
         ):
             raise Exception
         minor_level_indices = list(minor_levels.keys())
@@ -616,8 +630,8 @@ def _detect_basic_minor_levels(
             # We don't skip the last minor levels because, in a trend with significant price changes,
             # they are nearly the same price as the last date of the trend.
             # Detecting them helps us take profit earlier rather than waiting until the last date.
-        for minor_index, minor_level_type in minor_levels.items():
-            reformed_levels[major_index + minor_index] = minor_level_type
+        for minor_index, minor_level in minor_levels.items():
+            reformed_levels[major_index + minor_index] = minor_level
     reformed_levels[major_level_indices[-1]] = major_levels[major_level_indices[-1]]
     return reformed_levels
 
@@ -625,14 +639,14 @@ def _detect_basic_minor_levels(
 # Preemptive levels have prices that are near, but occur before the actual basic levels.
 # Finding them allows us to close a position earlier, rather than risking waiting until the trend has truly ended.
 def _detect_preemptive_levels(
-    prices: "pd.Series[float]", levels: OrderedDict[int, LevelType],
+    prices: "pd.Series[float]", levels: OrderedDict[int, Level],
     realization_target: float,
-) -> OrderedDict[int, LevelType]:
-    reformed_levels: OrderedDict[int, LevelType] = OrderedDict()
+) -> OrderedDict[int, Level]:
+    reformed_levels: OrderedDict[int, Level] = OrderedDict()
     level_indices = list(levels.keys())
     reformed_levels[level_indices[0]] = levels[level_indices[0]]  # Don't need to detect the first preemptive level
     for prev_index, index in zip(level_indices[:-1], level_indices[1:]):
-        is_support = levels[index].is_support
+        is_support = levels[index].level_type.is_support
         target_price = prices[prev_index] + realization_target * (prices[index] - prices[prev_index])
         preemptive_index: Optional[int] = None
         for i, price in enumerate(prices[prev_index:index + 1]):
@@ -640,8 +654,10 @@ def _detect_preemptive_levels(
                 preemptive_index = prev_index + i
                 break
         if preemptive_index is not None:
-            reformed_levels[preemptive_index] = LevelType.SUPPORT_PREEMPTIVE if is_support \
-                else LevelType.RESISTANCE_PREEMPTIVE
+            reformed_levels[preemptive_index] = Level(
+                prices[preemptive_index],
+                LevelType.SUPPORT_PREEMPTIVE if is_support else LevelType.RESISTANCE_PREEMPTIVE,
+            )
         else:
             reformed_levels[index] = levels[index]
     return reformed_levels
@@ -653,50 +669,52 @@ def _detect_preemptive_levels(
 # However, since the end level's price depends on both its own price and the previous level's price (ref: `_smooth` function),
 # it's simpler to view pullback levels as those where prices rely on other levels, i.e., the end levels.
 def _detect_pullback_levels(
-    levels: OrderedDict[int, LevelType],
+    prices: "pd.Series[float]",
+    levels: OrderedDict[int, Level],
     days_num: int,  # Max number of days to be considered a short-term trend
-) -> OrderedDict[int, LevelType]:
-    reformed_levels: OrderedDict[int, LevelType] = OrderedDict()
+    weight: float,
+) -> OrderedDict[int, Level]:
+    reformed_levels: OrderedDict[int, Level] = OrderedDict()
     level_indices = list(levels.keys())
+    pullback_prices: Dict[int, float] = {}
     i = 0
     while i < len(level_indices):
-        current_index = level_indices[i]
-        is_pullback = i > 0 and current_index - level_indices[i - 1] < days_num
-        pullback_level_type: Optional[LevelType] = None
-        if is_pullback:
-            if levels[current_index].is_support:
-                pullback_level_type = LevelType.SUPPORT_PULLBACK
+        index = level_indices[i]
+        prev_index = level_indices[i - 1]
+        if i > 0 and index - prev_index < days_num:  # Pullback
+            level_type: Optional[LevelType]
+            if levels[index].level_type.is_support:
+                level_type = LevelType.SUPPORT_PULLBACK
             else:
-                pullback_level_type = LevelType.RESISTANCE_PULLBACK
-        reformed_levels[current_index] = pullback_level_type or levels[current_index]
+                level_type = LevelType.RESISTANCE_PULLBACK
+            # Adjust the weight based on the number of days from the previous trend
+            adjusted_weight = weight * (index - prev_index) / days_num
+            # Price of a pullback level is calculated using its own price and price of the previous level,
+            # ensuring that even after a short-term trend, the price doesn't change too much.
+            prev_level_price = pullback_prices[prev_index] if prev_index in pullback_prices else prices[prev_index]
+            price = adjusted_weight * prices[index] + (1 - adjusted_weight) * prev_level_price
+            pullback_prices[index] = price
+            reformed_levels[index] = Level(price, level_type)
+        else:
+            reformed_levels[index] = levels[index]
         i += 1
     return reformed_levels
 
 
-def _smooth(
-    prices: "pd.Series[float]", levels: OrderedDict[int, LevelType],
-    pullback_days_num: int, pullback_weight: float,
-) -> np.ndarray:
-    # Treat the first and last prices as levels
-    level_indices = sorted(set(levels.keys()) | {0, len(prices) - 1})
-    # Prepare the prices for all levels
-    pullback_prices: Dict[int, float] = {}
+def _smooth(prices: "pd.Series[float]", levels: OrderedDict[int, Level]) -> np.ndarray:
+    DERIVATIVE = 0  # Set the derivative to zero at each level
+    level_indices = list(levels.keys())
     derivatives: List[float] = []
-    for i, index in enumerate(level_indices):
-        level_price: float
-        if i == 0 or index not in levels or levels[index].is_principal:
-            # Price of principal level is the same as its price
-            level_price = prices[index]
-        else:  # Pullback levels
-            prev_index = level_indices[i - 1]
-            # Adjust the weight based on the number of days from the previous trend
-            weight = pullback_weight * (index - prev_index) / pullback_days_num
-            # Price of a pullback level is calculated using its own price and price of the previous level,
-            # ensuring that even after a short-term trend, the price doesn't change too much.
-            prev_level_price = pullback_prices[prev_index] if prev_index in pullback_prices else prices[prev_index]
-            level_price = weight * prices[index] + (1 - weight) * prev_level_price
-            pullback_prices[index] = level_price
-        derivatives.append([level_price, 0])  # Set the derivative to zero at each level
+    if 0 not in levels:
+        # Treat the first price as a level
+        derivatives.append([prices[0], DERIVATIVE])
+        level_indices.insert(0, 0)
+    for index in levels:
+        derivatives.append([levels[index].price, DERIVATIVE])
+    if len(prices) - 1 not in levels:
+        # Treat the last price as a level
+        derivatives.append([prices[len(prices) - 1], DERIVATIVE])
+        level_indices.append(len(prices) - 1)
     interpolate = BPoly.from_derivatives(level_indices, derivatives)
     smoothed_prices = interpolate(np.arange(len(prices)))
     return smoothed_prices
