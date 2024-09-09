@@ -674,8 +674,46 @@ def _detect_pullback_levels(
     days_num: int,  # Max number of days to be considered a short-term trend
     weight: float,
 ) -> OrderedDict[int, Level]:
-    reformed_levels: OrderedDict[int, Level] = OrderedDict()
+    # Merge the consecutive pullback levels
+    merged_levels: OrderedDict[int, Level] = OrderedDict()
     level_indices = list(levels.keys())
+    i = 0
+    while i < len(level_indices):
+        cur_level_index: int = level_indices[i]
+        next_level_index: Optional[int] = None  # Has a type opposite to that of the current level
+        j = i + 1
+        # Iterate through the upcoming pullback levels
+        while j < len(level_indices):
+            if not (level_indices[j] - level_indices[j - 1] < days_num):
+                # Stop if it is not a pullback level
+                break
+            pullback_level = levels[level_indices[j]]
+            if levels[level_indices[i]].level_type.is_support:
+                if pullback_level.level_type.is_support:
+                    if pullback_level.price <= prices[cur_level_index]:
+                        # Update the current support level to one of these pullback levels with a lower price
+                        cur_level_index = level_indices[j]
+                        next_level_index = None  # The next resistance level must come after the current support level
+                else:
+                    if next_level_index is None or pullback_level.price >= prices[next_level_index]:
+                        next_level_index = level_indices[j]
+            else:
+                if not pullback_level.level_type.is_support:
+                    if pullback_level.price >= prices[cur_level_index]:
+                        # Update the current resistance level to one of these pullback levels with a higher price
+                        cur_level_index = level_indices[j]
+                        next_level_index = None  # The next support level must come after the current resistance level
+                else:
+                    if next_level_index is None or pullback_level.price <= prices[next_level_index]:
+                        next_level_index = level_indices[j]
+            j += 1
+        merged_levels[cur_level_index] = levels[cur_level_index]
+        if next_level_index is not None:
+            merged_levels[next_level_index] = levels[next_level_index]
+        i = j
+    # Adjust the prices of pullback levels
+    adjusted_levels: OrderedDict[int, Level] = OrderedDict()
+    level_indices = list(merged_levels.keys())
     pullback_prices: Dict[int, float] = {}
     i = 0
     while i < len(level_indices):
@@ -683,7 +721,7 @@ def _detect_pullback_levels(
         prev_index = level_indices[i - 1]
         if i > 0 and index - prev_index < days_num:  # Pullback
             level_type: Optional[LevelType]
-            if levels[index].level_type.is_support:
+            if merged_levels[index].level_type.is_support:
                 level_type = LevelType.SUPPORT_PULLBACK
             else:
                 level_type = LevelType.RESISTANCE_PULLBACK
@@ -694,11 +732,11 @@ def _detect_pullback_levels(
             prev_level_price = pullback_prices[prev_index] if prev_index in pullback_prices else prices[prev_index]
             price = adjusted_weight * prices[index] + (1 - adjusted_weight) * prev_level_price
             pullback_prices[index] = price
-            reformed_levels[index] = Level(price, level_type)
+            adjusted_levels[index] = Level(price, level_type)
         else:
-            reformed_levels[index] = levels[index]
+            adjusted_levels[index] = merged_levels[index]
         i += 1
-    return reformed_levels
+    return adjusted_levels
 
 
 def _smooth(prices: "pd.Series[float]", levels: OrderedDict[int, Level]) -> np.ndarray:
