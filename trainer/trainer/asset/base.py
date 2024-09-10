@@ -210,6 +210,12 @@ class Level:
         return self._level_type
 
 
+class ModificationType(Enum):
+    ORIGINAL = 0
+    LEVEL = 1
+    CMA = 2  # Centered Moving Average
+
+
 class DailyAsset(ABC):
     __symbol: str
     # Initialized only once
@@ -220,11 +226,13 @@ class DailyAsset(ABC):
     __indicators: List[DailyIndicator]
     __prev_random_radius: Optional[float]
 
+    __MODIFICATION_TYPE: ModificationType = ModificationType.ORIGINAL
     # TODO: Choose better values
-    __LEVEL_BASIC_PRICE_CHANGE: Optional[Tuple[Tuple[float, float], ...]] = None
+    __LEVEL_BASIC_PRICE_CHANGE: Tuple[Tuple[float, float], ...] = ((0.0, 0.0), (0.0, 0.0), (0.0, 0.0))
     __LEVEL_PREEMPTIVE_REALIZATION_TARGET: float = 1.0
     __LEVEL_PULLBACK_DAYS_NUM: int = 0
     __LEVEL_PULLBACK_WEIGHT: float = 0.0
+    __CMA_RADIUS: int = 0
     # NOTE: When adding a new hyperparameter to calculate historical and futuristic data,
     # remember to modify `calc_buffer_days_num` method
     __DELTA_DISTANCE = 1
@@ -324,8 +332,11 @@ class DailyAsset(ABC):
         highs = pd.Series(highs)
         lows = pd.Series(lows)
         closes = pd.Series(closes)
+        self.__levels = OrderedDict()
         modified_closes: pd.Series
-        if self.__LEVEL_BASIC_PRICE_CHANGE is not None:
+        if self.__MODIFICATION_TYPE == ModificationType.ORIGINAL:
+            modified_closes = closes.copy()
+        elif self.__MODIFICATION_TYPE == ModificationType.LEVEL:
             self.__levels = _detect_levels(
                 closes,
                 self.__LEVEL_BASIC_PRICE_CHANGE,
@@ -333,9 +344,11 @@ class DailyAsset(ABC):
                 self.__LEVEL_PULLBACK_DAYS_NUM, self.__LEVEL_PULLBACK_WEIGHT,
             )
             modified_closes = pd.Series(_smooth(closes, self.__levels))
+        elif self.__MODIFICATION_TYPE == ModificationType.CMA:
+            window = self.__CMA_RADIUS * 2 + 1
+            modified_closes = closes.rolling(window, min_periods=window, center=True).mean()
         else:
-            self.__levels = OrderedDict()
-            modified_closes = closes.copy()
+            raise NotImplementedError
         # Calculate indicators
         fast_emas = EMAIndicator(closes, window=self.__EMA_WINDOW_FAST).ema_indicator()
         slow_emas = EMAIndicator(closes, window=self.__EMA_WINDOW_SLOW).ema_indicator()
@@ -393,13 +406,14 @@ class DailyAsset(ABC):
     def calc_buffer_days_num(cls) -> Tuple[int, int]:
         # TODO: Check if these buffers are properly selected
         historical_buffer_days_num = max(
+            cls.__CMA_RADIUS,  # For first `nan`s of modified CMAs
             cls.__DELTA_DISTANCE,  # For price delta ratios
             max(cls.__EMA_WINDOW_FAST - 1, cls.__EMA_WINDOW_SLOW - 1),  # For first `nan`s of EMA diff ratios
             cls.__RSI_WINDOW - 1,  # For first `nan`s of RSIs
             cls.__ADX_WINDOW * 2 - 1,  # For first `0`s of ADXs
             cls.__CCI_WINDOW - 1,  # For first `nan`s of CCIs
         )
-        futuristic_buffer_days_num = 0
+        futuristic_buffer_days_num = cls.__CMA_RADIUS  # For last `nan`s of modified CMAs
         return historical_buffer_days_num, futuristic_buffer_days_num
 
     @property
