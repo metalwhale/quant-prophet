@@ -164,6 +164,7 @@ class TradingPlatform(gym.Env):
     # Constants, mainly used only for training
     _POSITION_AMOUNT_UNIT: float = 100.0
     _RANDOM_RADIUS: Optional[int] = 0
+    _RANDOM_END_DAYS_NUM: Optional[int] = None
 
     def __init__(
         self,
@@ -453,7 +454,10 @@ class TradingPlatform(gym.Env):
         date = self._date_range[self._date_index]
         if hasattr(self, "_prices") and len(self._prices) > 0 and self._prices[-1].date == date:
             return
-        self._prices = self._asset.retrieve_historical_prices(date, self._historical_days_num)
+        self._prices = self._asset.retrieve_historical_prices(
+            date, self._historical_days_num,
+            random_end_days_num=self._RANDOM_END_DAYS_NUM if self._randomizing else None,
+        )
 
     def _obtain_observation(self) -> Dict[str, Any]:
         # Observation for historical features

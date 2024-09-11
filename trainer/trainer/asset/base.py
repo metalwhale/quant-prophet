@@ -46,6 +46,7 @@ class DailyCandle:
 
 class DailyIndicator:
     _date: datetime.date
+    _price_range: Tuple[float, float]
     _actual_price: float
     _modified_price: float
     _emas: Tuple[float, float]
@@ -55,10 +56,11 @@ class DailyIndicator:
 
     def __init__(
         self,
-        date: datetime.date, actual_price: float, modified_price: float,
+        date: datetime.date, price_range: Tuple[float, float], actual_price: float, modified_price: float,
         emas: Tuple[float, float], rsi: float, adx: float, cci: float,
     ) -> None:
         self._date = date
+        self._price_range = price_range
         self._actual_price = actual_price
         self._modified_price = modified_price
         self._emas = emas
@@ -69,6 +71,10 @@ class DailyIndicator:
     @property
     def date(self) -> datetime.date:
         return self._date
+
+    @property
+    def price_range(self) -> Tuple[float, float]:
+        return self._price_range
 
     @property
     def actual_price(self) -> float:
@@ -217,6 +223,19 @@ class ModificationType(Enum):
 
 
 class DailyAsset(ABC):
+    class Indicator:
+        def __init__(
+            self,
+            actual_price: float,
+            emas: Tuple[float, float],
+            rsi: float, adx: float, cci: float,
+        ) -> None:
+            self.actual_price = actual_price
+            self.emas = emas
+            self.rsi = rsi
+            self.adx = adx
+            self.cci = cci
+
     __symbol: str
     # Initialized only once
     __candles: List[DailyCandle]
@@ -357,13 +376,13 @@ class DailyAsset(ABC):
         ccis = CCIIndicator(highs, lows, closes, window=self.__CCI_WINDOW).cci()
         # Store the indicators
         self.__indicators = []
-        for (candle, actual_close, modified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
-            self.__candles, closes, modified_closes,
+        for (candle, low, high, actual_close, modified_close, fast_ema, slow_ema, rsi, adx, cci) in zip(
+            self.__candles, lows, highs, closes, modified_closes,
             fast_emas, slow_emas, rsis, adxs, ccis,
             strict=True,
         ):
             self.__indicators.append(DailyIndicator(
-                candle.date, actual_close, modified_close,
+                candle.date, (low, high), actual_close, modified_close,
                 # Indicators near the end date will be recalculated each time historical data is retrieved
                 (fast_ema, slow_ema), rsi, adx, cci,
             ))
@@ -371,7 +390,11 @@ class DailyAsset(ABC):
     # Returns prices within a specified date range, defined by an end date and the number of days to retrieve.
     # The actual price used is usually the close price, except for end date,
     # where there is an option to be randomly chosen within the range of low price to high price.
-    def retrieve_historical_prices(self, end_date: datetime.date, days_num: int) -> List[DailyPrice]:
+    def retrieve_historical_prices(
+        self,
+        end_date: datetime.date, days_num: int,
+        random_end_days_num: Optional[int] = None,
+    ) -> List[DailyPrice]:
         historical_buffer_days_num, futuristic_buffer_days_num = self.calc_buffer_days_num()
         end_date_index = self.__get_date_index(end_date)
         if (
@@ -387,19 +410,42 @@ class DailyAsset(ABC):
         start_date_index = end_date_index - (days_num - 1)
         indicators = self.__indicators[start_date_index:end_date_index + 1]
         # Historical prices for the days before `end_date`
+        randomized_indicators: Dict[int, DailyAsset.Indicator] = {}
         for i in range(len(indicators)):
-            prices.append(DailyPrice(
+            # Prepare indicators
+            actual_price = indicators[i].actual_price
+            emas = indicators[i].emas
+            rsi = indicators[i].rsi
+            adx = indicators[i].adx
+            cci = indicators[i].cci
+            if random_end_days_num is not None and i >= len(indicators) - random_end_days_num:
+                actual_price = np.random.uniform(*indicators[i].price_range)
+                prev_fast_ema, prev_slow_ema = randomized_indicators.get(i - 1, indicators[i - 1]).emas
+                emas = (
+                    _calc_ema(actual_price, prev_fast_ema, self.__EMA_WINDOW_FAST),
+                    _calc_ema(actual_price, prev_slow_ema, self.__EMA_WINDOW_SLOW),
+                )
+                # TODO: Randomize other indicators
+                randomized_indicators[i] = DailyAsset.Indicator(actual_price, emas, rsi, adx, cci)
+            # Prepare data for daily price
+            prev_actual_price = randomized_indicators.get(
+                i - self.__DELTA_DISTANCE,
+                indicators[i - self.__DELTA_DISTANCE],
+            ).actual_price
+            price_delta_ratio = actual_price / prev_actual_price - 1
+            ema_diff_ratio = emas[0] / emas[1] - 1
+            scaled_rsi = rsi / 100  # RSI range between 0 and 100
+            scaled_adx = adx / 100  # ADX range between 0 and 100
+            scaled_cci = cci / 400  # TODO: Choose a better bound for CCI
+            price = DailyPrice(
                 indicators[i].date,
                 self.__levels[start_date_index + i].level_type if start_date_index + i in self.__levels else None,
                 indicators[i].actual_price,
                 indicators[i].modified_price,
                 # Features
-                indicators[i].actual_price / indicators[i - self.__DELTA_DISTANCE].actual_price - 1,
-                indicators[i].emas[0] / indicators[i].emas[1] - 1,
-                indicators[i].rsi / 100,  # RSI range between 0 and 100
-                indicators[i].adx / 100,  # ADX range between 0 and 100
-                indicators[i].cci / 400,  # TODO: Choose a better bound for CCI
-            ))
+                price_delta_ratio, ema_diff_ratio, scaled_rsi, scaled_adx, scaled_cci,
+            )
+            prices.append(price)
         return prices
 
     @classmethod
@@ -770,3 +816,9 @@ def _smooth(prices: "pd.Series[float]", levels: OrderedDict[int, Level]) -> np.n
     interpolate = BPoly.from_derivatives(level_indices, derivatives)
     smoothed_prices = interpolate(np.arange(len(prices)))
     return smoothed_prices
+
+
+def _calc_ema(price: float, prev_ema: float, window: int) -> float:
+    ema_smoothing_factor = 2 / (window + 1)  # See: https://www.investopedia.com/terms/e/ema.asp
+    ema = ema_smoothing_factor * price + (1 - ema_smoothing_factor) * prev_ema
+    return ema
