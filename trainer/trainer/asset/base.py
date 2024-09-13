@@ -218,8 +218,9 @@ class Level:
 
 class ModificationType(Enum):
     ORIGINAL = 0
-    LEVEL = 1
-    CMA = 2  # Centered Moving Average
+    CMA = 1  # Centered Moving Average
+    LEVEL = 2
+    CMA_LEVEL = 3
 
 
 class DailyAsset(ABC):
@@ -355,6 +356,8 @@ class DailyAsset(ABC):
         modified_closes: pd.Series
         if self.__MODIFICATION_TYPE == ModificationType.ORIGINAL:
             modified_closes = closes.copy()
+        elif self.__MODIFICATION_TYPE == ModificationType.CMA:
+            modified_closes = closes.rolling(self.__CMA_RADIUS * 2 + 1, min_periods=0, center=True).mean()
         elif self.__MODIFICATION_TYPE == ModificationType.LEVEL:
             self.__levels = _detect_levels(
                 closes,
@@ -363,9 +366,15 @@ class DailyAsset(ABC):
                 self.__LEVEL_PULLBACK_DAYS_NUM, self.__LEVEL_PULLBACK_WEIGHT,
             )
             modified_closes = pd.Series(_smooth(closes, self.__levels))
-        elif self.__MODIFICATION_TYPE == ModificationType.CMA:
-            window = self.__CMA_RADIUS * 2 + 1
-            modified_closes = closes.rolling(window, min_periods=window, center=True).mean()
+        elif self.__MODIFICATION_TYPE == ModificationType.CMA_LEVEL:
+            simplified_closes = closes.rolling(self.__CMA_RADIUS * 2 + 1, min_periods=0, center=True).mean()
+            self.__levels = _detect_levels(
+                simplified_closes,
+                self.__LEVEL_BASIC_PRICE_CHANGE,
+                self.__LEVEL_PREEMPTIVE_REALIZATION_TARGET,
+                self.__LEVEL_PULLBACK_DAYS_NUM, self.__LEVEL_PULLBACK_WEIGHT,
+            )
+            modified_closes = pd.Series(_smooth(simplified_closes, self.__levels))
         else:
             raise NotImplementedError
         # Calculate indicators
@@ -452,14 +461,13 @@ class DailyAsset(ABC):
     def calc_buffer_days_num(cls) -> Tuple[int, int]:
         # TODO: Check if these buffers are properly selected
         historical_buffer_days_num = max(
-            cls.__CMA_RADIUS,  # For first `nan`s of modified CMAs
             cls.__DELTA_DISTANCE,  # For price delta ratios
             max(cls.__EMA_WINDOW_FAST - 1, cls.__EMA_WINDOW_SLOW - 1),  # For first `nan`s of EMA diff ratios
             cls.__RSI_WINDOW - 1,  # For first `nan`s of RSIs
             cls.__ADX_WINDOW * 2 - 1,  # For first `0`s of ADXs
             cls.__CCI_WINDOW - 1,  # For first `nan`s of CCIs
         )
-        futuristic_buffer_days_num = cls.__CMA_RADIUS  # For last `nan`s of modified CMAs
+        futuristic_buffer_days_num = 0
         return historical_buffer_days_num, futuristic_buffer_days_num
 
     @property
