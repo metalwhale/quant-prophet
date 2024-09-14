@@ -164,7 +164,7 @@ class TradingPlatform(gym.Env):
     # Constants, mainly used only for training
     _POSITION_AMOUNT_UNIT: float = 100.0
     _RANDOM_RADIUS: Optional[int] = 0
-    _RANDOM_END_DAYS_NUM: Optional[int] = None
+    _MAX_RANDOM_END_DAYS_NUM: Optional[int] = 0
 
     def __init__(
         self,
@@ -456,7 +456,7 @@ class TradingPlatform(gym.Env):
             return
         self._prices = self._asset.retrieve_historical_prices(
             date, self._historical_days_num,
-            random_end_days_num=self._RANDOM_END_DAYS_NUM if self._randomizing else None,
+            max_random_end_days_num=self._MAX_RANDOM_END_DAYS_NUM if self._randomizing else 0,
         )
 
     def _obtain_observation(self) -> Dict[str, Any]:

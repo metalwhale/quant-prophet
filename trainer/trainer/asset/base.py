@@ -402,7 +402,7 @@ class DailyAsset(ABC):
     def retrieve_historical_prices(
         self,
         end_date: datetime.date, days_num: int,
-        random_end_days_num: Optional[int] = None,
+        max_random_end_days_num: Optional[int] = 0,
     ) -> List[DailyPrice]:
         historical_buffer_days_num, futuristic_buffer_days_num = self.calc_buffer_days_num()
         end_date_index = self.__get_date_index(end_date)
@@ -418,6 +418,13 @@ class DailyAsset(ABC):
         prices: List[DailyPrice] = []
         start_date_index = end_date_index - (days_num - 1)
         indicators = self.__indicators[start_date_index:end_date_index + 1]
+        random_end_days_num = len(indicators)  # Randomize all by default
+        # TODO: Find a faster way to get the previous levels
+        prev_level_indices = [i for i in self.__levels.keys() if i >= start_date_index and i < end_date_index]
+        if len(prev_level_indices) > 0:
+            random_end_days_num = end_date_index - prev_level_indices[-1]
+        if max_random_end_days_num is not None:
+            random_end_days_num = min(random_end_days_num, max_random_end_days_num)
         # Historical prices for the days before `end_date`
         randomized_indicators: Dict[int, DailyAsset.Indicator] = {}
         for i in range(len(indicators)):
@@ -427,7 +434,7 @@ class DailyAsset(ABC):
             rsi = indicators[i].rsi
             adx = indicators[i].adx
             cci = indicators[i].cci
-            if random_end_days_num is not None and i >= len(indicators) - random_end_days_num:
+            if i >= len(indicators) - random_end_days_num:
                 actual_price = np.random.uniform(*indicators[i].price_range)
                 prev_fast_ema, prev_slow_ema = randomized_indicators.get(i - 1, indicators[i - 1]).emas
                 emas = (
