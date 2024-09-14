@@ -365,16 +365,16 @@ class DailyAsset(ABC):
                 self.__LEVEL_PREEMPTIVE_REALIZATION_TARGET,
                 self.__LEVEL_PULLBACK_DAYS_NUM, self.__LEVEL_PULLBACK_WEIGHT,
             )
-            modified_closes = pd.Series(_smooth(closes, self.__levels))
+            modified_closes = pd.Series(_simplify(closes, self.__levels))
         elif self.__MODIFICATION_TYPE == ModificationType.CMA_LEVEL:
-            simplified_closes = closes.rolling(self.__CMA_RADIUS * 2 + 1, min_periods=0, center=True).mean()
+            smoothed_closes = closes.rolling(self.__CMA_RADIUS * 2 + 1, min_periods=0, center=True).mean()
             self.__levels = _detect_levels(
-                simplified_closes,
+                smoothed_closes,
                 self.__LEVEL_BASIC_PRICE_CHANGE,
                 self.__LEVEL_PREEMPTIVE_REALIZATION_TARGET,
                 self.__LEVEL_PULLBACK_DAYS_NUM, self.__LEVEL_PULLBACK_WEIGHT,
             )
-            modified_closes = pd.Series(_smooth(simplified_closes, self.__levels))
+            modified_closes = pd.Series(_simplify(smoothed_closes, self.__levels))
         else:
             raise NotImplementedError
         # Calculate indicators
@@ -741,7 +741,7 @@ def _detect_preemptive_levels(
 # Pullback levels mark the end of short-term trends, appear within a longer trend but in the opposite direction,
 # denote a temporary reversal, and then return to the main trend shortly after.
 # NOTE: It's more accurate to define a pullback level as the start of a short-term trend rather than its end.
-# However, since the end level's price depends on both its own price and the previous level's price (ref: `_smooth` function),
+# However, since the end level's price depends on both its own price and the previous level's price (ref: `_simplify` function),
 # it's simpler to view pullback levels as those where prices rely on other levels, i.e., the end levels.
 def _detect_pullback_levels(
     prices: "pd.Series[float]",
@@ -814,7 +814,7 @@ def _detect_pullback_levels(
     return adjusted_levels
 
 
-def _smooth(prices: "pd.Series[float]", levels: OrderedDict[int, Level]) -> np.ndarray:
+def _simplify(prices: "pd.Series[float]", levels: OrderedDict[int, Level]) -> np.ndarray:
     DERIVATIVE = 0  # Set the derivative to zero at each level
     level_indices = list(levels.keys())
     derivatives: List[float] = []
@@ -829,8 +829,8 @@ def _smooth(prices: "pd.Series[float]", levels: OrderedDict[int, Level]) -> np.n
         derivatives.append([prices[len(prices) - 1], DERIVATIVE])
         level_indices.append(len(prices) - 1)
     interpolate = BPoly.from_derivatives(level_indices, derivatives)
-    smoothed_prices = interpolate(np.arange(len(prices)))
-    return smoothed_prices
+    simplified_prices = interpolate(np.arange(len(prices)))
+    return simplified_prices
 
 
 def _calc_ema(price: float, prev_ema: float, window: int) -> float:
