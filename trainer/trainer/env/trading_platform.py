@@ -147,6 +147,7 @@ class TradingPlatform(gym.Env):
     _historical_days_num: int  # Number of days used for retrieving historical data
 
     # Hyperparameters
+    _position_holding_penalty: Tuple[float, int] = (0.0, 1)  # Fee, number of days
     _position_opening_penalty: float = 0.0
 
     # State components
@@ -157,6 +158,7 @@ class TradingPlatform(gym.Env):
     _date_index: int  # Grows in the same episode, resets to 0 for a new episode
     _prices: List[DailyPrice]  # Updated whenever the date changes
     _positions: List[Position]  # Keeps adding positions in the same episode, clears them all for a new episode
+    _last_position_date_index: Optional[int]  # Used to calculate the penalty for holding positions
 
     # Extra information
     _extra_info: ExtraInfo
@@ -188,6 +190,7 @@ class TradingPlatform(gym.Env):
             "historical_scaled_ccis": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             "last_position_type": gym.spaces.Discrete(len(PositionType)),
             "last_position_net_ratio": gym.spaces.Box(-1, 1, shape=(1,)),
+            "last_position_holding_days_ratio": gym.spaces.Box(0, 1, shape=(1,)),
         })
 
     def reset(
@@ -203,6 +206,7 @@ class TradingPlatform(gym.Env):
         self._date_index = 0
         self._retrieve_prices()
         self._positions = []
+        self._last_position_date_index = None
         observation = self._obtain_observation()
         info = {}
         self._extra_info = self.ExtraInfo()
@@ -216,6 +220,7 @@ class TradingPlatform(gym.Env):
                 else self._prices[-1].actual_price
             position = Position(self._prices[-1].date, PositionType(action), self._prices[-1], amount)
             self._positions.append(position)
+            self._last_position_date_index = self._date_index
             # Penalty for opening a new position
             # TODO: Consider which types of positions we should penalize (currently all)
             reward += position.amount * -self._position_opening_penalty
@@ -233,7 +238,13 @@ class TradingPlatform(gym.Env):
         # - The optimal position amount for calculating rewards is unclear, whether using a fixed unit or the actual price.
         # Note that this doesn't mean it's not good to include the earning of BUY positions for reward.
         if self._positions[-1].position_type == PositionType.SELL:
-            reward += earning
+            fee = 0
+            # Penalty for holding position
+            if self._last_position_date_index is not None:
+                max_holding_fee, _ = self._position_holding_penalty
+                # Apply max fee for the first day after opening the position, and decrease the fee over time
+                fee = max_holding_fee * (1 - self._last_position_holding_days_ratio)
+            reward += earning * (1 - fee)
         # Read more about termination and truncation at:
         # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/handling_time_limits/
         # - https://farama.org/Gymnasium-Terminated-Truncated-Step-API
@@ -446,6 +457,11 @@ class TradingPlatform(gym.Env):
     def _last_position_net_ratio(self) -> float:
         return _calc_position_net_ratio(self._positions[-1], self._prices[-1], self._position_net_price_type)
 
+    @property
+    def _last_position_holding_days_ratio(self) -> float:
+        _, max_holding_days_num = self._position_holding_penalty
+        return min(1.0, (self._date_index - 1 - self._last_position_date_index) / max_holding_days_num)
+
     # Should be called right after updating `self._date_index` to the newest date
     def _retrieve_prices(self):
         # Since `retrieve_historical_prices` chooses the end price from a random time on the same end date,
@@ -471,9 +487,11 @@ class TradingPlatform(gym.Env):
             self.np_random.choice([PositionType.BUY, PositionType.SELL])
         )
         last_position_net_ratio: float = 0
+        last_position_holding_days_ratio: float = 0
         if len(self._positions) > 0:
             last_position_type = self._positions[-1].position_type
             last_position_net_ratio = self._last_position_net_ratio
+            last_position_holding_days_ratio = self._last_position_holding_days_ratio
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
         return {
             "historical_price_delta_ratios": np.array([p.price_delta_ratio for p in self._prices]),
@@ -483,6 +501,7 @@ class TradingPlatform(gym.Env):
             "historical_scaled_ccis": np.array(historical_scaled_ccis),
             "last_position_type": np.array([last_position_type.value], dtype=int),
             "last_position_net_ratio": np.array([last_position_net_ratio]),
+            "last_position_holding_days_ratio": np.array([last_position_holding_days_ratio]),
         }
 
 
