@@ -8,7 +8,7 @@ import torch
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
 from stable_baselines3.common.base_class import BaseAlgorithm
-from stable_baselines3 import DQN
+from stable_baselines3 import DQN, PPO
 
 from ..asset.base import DailyAsset, DailyPrice
 from .asset_pool import AssetPool
@@ -410,6 +410,11 @@ class TradingPlatform(gym.Env):
                         # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/dqn/policies.py#L183
                         # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/dqn/policies.py#L68
                         action_values = model.policy.q_net(obs_tensor)
+                    elif isinstance(model, PPO):
+                        # See:
+                        # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/common/policies.py#L717
+                        # - https://stackoverflow.com/questions/66428307/how-to-get-action-propability-in-stable-baselines-3
+                        action_values = model.policy.get_distribution(obs_tensor).distribution.probs
                     else:
                         # TODO: Handle other algorithms
                         raise NotImplementedError
