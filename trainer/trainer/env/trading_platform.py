@@ -161,7 +161,7 @@ class TradingPlatform(gym.Env):
     _extra_info: ExtraInfo
 
     # Constants, mainly used only for training
-    _POSITION_AMOUNT_UNIT: float = 100.0
+    _POSITION_AMOUNT_UNIT: float = 1.0
     _RANDOM_RADIUS: Optional[int] = 0
     _MAX_RANDOM_END_DAYS_NUM: Optional[int] = 0
 

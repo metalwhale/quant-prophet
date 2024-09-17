@@ -8,7 +8,7 @@ from train import generate_zigzag_assets
 def test_earning_calculation() -> bool:
     PUBLISHED_DATE_STR = "2010-01-01"
     HISTORICAL_DAYS_NUM = 90
-    EPSILON = 1e-11
+    EPSILON = 1e-13
     asset_pool = AssetPool(generate_zigzag_assets(PUBLISHED_DATE_STR, 100))
     asset_pool.apply_date_range((None, None), HISTORICAL_DAYS_NUM)
     env = TradingPlatform(asset_pool, HISTORICAL_DAYS_NUM)

@@ -83,7 +83,6 @@ def train(env_type: str):
     model = DQN(
         "MultiInputPolicy", train_env,
         gamma=0.9,
-        exploration_fraction=0.02,
         policy_kwargs={"net_arch": [128, 128, 128]},
         verbose=1,
     )
@@ -92,7 +91,7 @@ def train(env_type: str):
         callback=FullEvalCallback(
             Path(__file__).parent.parent / "data" / env_type / "output" / now,
             eval_envs, 100,
-            action_diff_threshold=1.0, showing_image=False,
+            action_diff_threshold=0.0, showing_image=False,
         ),
         log_interval=100,
     )
