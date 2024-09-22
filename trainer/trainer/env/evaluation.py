@@ -16,7 +16,6 @@ class FullEvalCallback(BaseCallback):
     _output_path: Path
     _envs: Dict[str, TradingPlatform]
     _freq: int
-    _action_diff_threshold: float
     _showing_image: bool
 
     _ep_count: int
@@ -29,7 +28,7 @@ class FullEvalCallback(BaseCallback):
     def __init__(
         self,
         output_path: Path, envs: Dict[str, TradingPlatform], freq: int,
-        action_diff_threshold: float = 0.0, showing_image: bool = True,
+        showing_image: bool = True,
         verbose: int = 0,
     ):
         super().__init__(verbose)
@@ -37,7 +36,6 @@ class FullEvalCallback(BaseCallback):
         self._output_path = output_path
         self._envs = envs
         self._freq = freq
-        self._action_diff_threshold = action_diff_threshold
         self._showing_image = showing_image
         # Initialization
         os.makedirs(output_path, exist_ok=True)
@@ -75,10 +73,7 @@ class FullEvalCallback(BaseCallback):
                     rendered,
                     (_, earning, price_change, wl_ratio),
                     (positions, last_price),
-                ) = env.trade(
-                    model=self.model,
-                    action_diff_threshold=self._action_diff_threshold, stopping_when_done=False,
-                )
+                ) = env.trade(model=self.model, stopping_when_done=False)
                 initial_amount = positions[0].amount
                 earning_ratio = (initial_amount + earning) / (initial_amount + price_change) - 1
                 asset_results[symbol] |= {

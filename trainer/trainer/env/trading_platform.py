@@ -20,10 +20,11 @@ YEARLY_TRADABLE_DAYS_NUM = 250
 
 class PositionType(Enum):
     _sign: int
+    _color: str
 
-    BUY = 0, 1
-    SELL = 1, -1
-    SIDELINE = 2, 0
+    BUY = 0, 1, "green"
+    SELL = 1, -1, "red"
+    HOLD = 2, 0, "gray"
 
     # LINK: See: https://stackoverflow.com/a/54732120
     def __new__(cls, *args) -> "PositionType":
@@ -31,12 +32,17 @@ class PositionType(Enum):
         obj._value_ = args[0]
         return obj
 
-    def __init__(self, _: int, sign: int) -> None:
+    def __init__(self, _: int, sign: int, color) -> None:
         self._sign = sign
+        self._color = color
 
     @property
     def sign(self) -> int:
         return self._sign
+
+    @property
+    def color(self) -> str:
+        return self._color
 
 
 class Position:
@@ -86,11 +92,13 @@ class AmountType(Enum):
 # - https://stable-baselines3.readthedocs.io/en/v2.3.2/guide/custom_env.html
 class TradingPlatform(gym.Env):
     class ExtraInfo:
-        action_values: Dict[datetime.date, Tuple[float, float, float]]
+        action_values: Dict[datetime.date, Dict[PositionType, float]]
+        actions: Dict[datetime.date, int]
         earning: float
 
         def __init__(self) -> None:
             self.action_values = {}
+            self.actions = {}
             self.earning = 0
 
     metadata = {"render_modes": ["rgb_array"]}
@@ -177,7 +185,6 @@ class TradingPlatform(gym.Env):
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
         # Environment
-        # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
         self.action_space = gym.spaces.Discrete(len(PositionType) - 1)
         self.observation_space = gym.spaces.Dict({
             "historical_price_delta_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
@@ -301,19 +308,10 @@ class TradingPlatform(gym.Env):
                     position_type: PositionType
                     if position_index is None:
                         # The days before first position
-                        position_type = PositionType.SIDELINE
+                        position_type = PositionType.HOLD
                     else:
                         position_type = self._positions[position_index].position_type
-                    color: str
-                    if position_type == PositionType.SIDELINE:
-                        color = "gray"
-                    elif position_type == PositionType.BUY:
-                        color = "green"
-                    elif position_type == PositionType.SELL:
-                        color = "red"
-                    else:
-                        color = "black"  # Placeholder
-                    axes.plot([d for d, _ in date_prices], [p for _, p in date_prices], color=color)
+                    axes.plot([d for d, _ in date_prices], [p for _, p in date_prices], color=position_type.color)
                 # Move to next position
                 position_index = next_position_index
                 date_prices = [date_price]
@@ -343,20 +341,24 @@ class TradingPlatform(gym.Env):
         # Plot action values
         action_values = self._extra_info.action_values
         axes = figure.add_subplot(subplots_num, 1, subplots_num)
-        all_axes.append(("action value", axes, {d: v[2] for d, v in action_values.items()}))
+        all_axes.append((
+            "action value", axes,
+            {d: v[PositionType(self._extra_info.actions[d])] for d, v in action_values.items()},
+        ))
         axes.plot(dates, [0 for _ in dates], color="gray")
-        axes.plot(dates, [action_values[d][0] if d in action_values else None for d in dates], color="green", alpha=0.2)
-        axes.plot(dates, [action_values[d][1] if d in action_values else None for d in dates], color="red", alpha=0.2)
-        axes.plot(dates, [action_values[d][2] if d in action_values else None for d in dates], color="orange")
+        for position_type in [PositionType.BUY, PositionType.SELL]:
+            axes.plot(
+                dates, [action_values[d][position_type] if d in action_values else None for d in dates],
+                color=position_type.color,
+            )
         # Common plots for all axes
         for title, axes, position_values in all_axes:
             axes.set_title(title)
             # Plot positions
             for position in self._positions:
-                is_buy = position.position_type == PositionType.BUY
                 axes.plot(
                     position.date, position_values[position.date],
-                    color="green" if is_buy else "red", marker="o", markersize=0.5,
+                    color=position.position_type.color, marker="o", markersize=0.5,
                 )
             # Adjust other properties
             for line in axes.lines:
@@ -370,7 +372,6 @@ class TradingPlatform(gym.Env):
     def trade(
         self,
         model: Optional[BaseAlgorithm] = None,
-        action_diff_threshold: float = 0.0,
         max_step: Optional[int] = None,
         stopping_when_done: bool = True,
         rendering: bool = True,
@@ -379,7 +380,7 @@ class TradingPlatform(gym.Env):
         obs, _ = self.reset()
         # Run one episode
         step = 0
-        action: Optional[PositionType] = None
+        position_type: PositionType
         while max_step is None or step < max_step:
             if model is not None:
                 # See:
@@ -387,30 +388,31 @@ class TradingPlatform(gym.Env):
                 # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/common/policies.py#L331
                 model.policy.set_training_mode(False)
                 obs_tensor, _ = model.policy.obs_to_tensor(obs)
-                action_values: torch.Tensor
+                action_tensor: torch.Tensor
                 with torch.no_grad():
                     if isinstance(model, DQN):
                         # See:
                         # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/dqn/policies.py#L183
                         # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/dqn/policies.py#L68
-                        action_values = model.policy.q_net(obs_tensor)
+                        action_tensor = model.policy.q_net(obs_tensor)
                     elif isinstance(model, PPO):
                         # See:
                         # - https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/common/policies.py#L717
                         # - https://stackoverflow.com/questions/66428307/how-to-get-action-propability-in-stable-baselines-3
-                        action_values = model.policy.get_distribution(obs_tensor).distribution.probs
+                        action_tensor = model.policy.get_distribution(obs_tensor).distribution.probs
                     else:
                         # TODO: Handle other algorithms
                         raise NotImplementedError
-                # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
-                buy_value, sell_value = action_values.cpu().numpy().squeeze()
-                action_diff = buy_value - sell_value
-                self._extra_info.action_values[self._prices[-1].date] = (buy_value, sell_value, action_diff)
-                if abs(action_diff) >= action_diff_threshold or action is None:
-                    action = PositionType.BUY if action_diff >= 0 else PositionType.SELL
+                action_values: np.ndarray = action_tensor.cpu().numpy().squeeze()
+                self._extra_info.action_values[self._prices[-1].date] = {
+                    PositionType(i): v for i, v in enumerate(action_values)
+                }
+                action = action_values.argmax()
+                self._extra_info.actions[self._prices[-1].date] = action
+                position_type = PositionType(action)
             else:
-                action = np.random.choice([PositionType.SIDELINE, PositionType.BUY, PositionType.SELL])
-            obs, _, terminated, truncated, info = self.step(action.value)
+                position_type = np.random.choice([PositionType.BUY, PositionType.SELL, PositionType.HOLD])
+            obs, _, terminated, truncated, info = self.step(position_type.value)
             is_end_of_date = info["is_end_of_date"]
             if is_end_of_date or (stopping_when_done and (terminated or truncated)):
                 break
@@ -466,10 +468,7 @@ class TradingPlatform(gym.Env):
         historical_scaled_adxs = [p.scaled_adx for p in self._prices]
         historical_scaled_ccis = [p.scaled_cci for p in self._prices]
         # Observation for the last position
-        last_position_type: PositionType = PositionType(
-            # LINK: Ignore the last position type (SIDELINE), use only BUY and SELL
-            self.np_random.choice([PositionType.BUY, PositionType.SELL])
-        )
+        last_position_type: PositionType = PositionType(self.np_random.choice([PositionType.BUY, PositionType.SELL]))
         if len(self._positions) > 0:
             last_position_type = self._positions[-1].position_type
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working

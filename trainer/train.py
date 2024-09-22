@@ -91,7 +91,7 @@ def train(env_type: str):
         callback=FullEvalCallback(
             Path(__file__).parent.parent / "data" / env_type / "output" / now,
             eval_envs, 100,
-            action_diff_threshold=0.0, showing_image=False,
+            showing_image=False,
         ),
         log_interval=100,
     )
