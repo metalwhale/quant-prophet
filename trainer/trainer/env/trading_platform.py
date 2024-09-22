@@ -185,7 +185,7 @@ class TradingPlatform(gym.Env):
         self._asset_pool = asset_pool
         self._historical_days_num = historical_days_num
         # Environment
-        self.action_space = gym.spaces.Discrete(len(PositionType) - 1)
+        self.action_space = gym.spaces.Discrete(len(PositionType))
         self.observation_space = gym.spaces.Dict({
             "historical_price_delta_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
             "historical_ema_diff_ratios": gym.spaces.Box(-1, 1, shape=(self._historical_days_num,)),
@@ -214,12 +214,17 @@ class TradingPlatform(gym.Env):
         return observation, info
 
     def step(self, action: np.int64) -> tuple[Dict[str, Any], SupportsFloat, bool, bool, dict[str, Any]]:
+        position_type = PositionType(action)
         reward = 0
         # If the position type changes, close the current position and open a new one
-        if len(self._positions) == 0 or action != self._positions[-1].position_type.value:
+        if (
+            len(self._positions) == 0
+            # Only change to a new position with a type other than HOLD
+            or position_type not in [PositionType.HOLD, self._positions[-1].position_type]
+        ):
             amount = self._POSITION_AMOUNT_UNIT if self._position_amount_type == AmountType.UNIT \
                 else self._prices[-1].actual_price
-            position = Position(self._prices[-1].date, PositionType(action), self._prices[-1], amount)
+            position = Position(self._prices[-1].date, position_type, self._prices[-1], amount)
             self._positions.append(position)
         # Recalculate position's net by first reverting net of the current date.
         # The net of the next date will be calculated later.
@@ -346,7 +351,7 @@ class TradingPlatform(gym.Env):
             {d: v[PositionType(self._extra_info.actions[d])] for d, v in action_values.items()},
         ))
         axes.plot(dates, [0 for _ in dates], color="gray")
-        for position_type in [PositionType.BUY, PositionType.SELL]:
+        for position_type in [PositionType.BUY, PositionType.SELL, PositionType.HOLD]:
             axes.plot(
                 dates, [action_values[d][position_type] if d in action_values else None for d in dates],
                 color=position_type.color,
@@ -468,7 +473,7 @@ class TradingPlatform(gym.Env):
         historical_scaled_adxs = [p.scaled_adx for p in self._prices]
         historical_scaled_ccis = [p.scaled_cci for p in self._prices]
         # Observation for the last position
-        last_position_type: PositionType = PositionType(self.np_random.choice([PositionType.BUY, PositionType.SELL]))
+        last_position_type = PositionType.HOLD
         if len(self._positions) > 0:
             last_position_type = self._positions[-1].position_type
         # See: https://stackoverflow.com/questions/73922332/dict-observation-space-for-stable-baselines3-not-working
