@@ -92,14 +92,19 @@ class AmountType(Enum):
 # - https://stable-baselines3.readthedocs.io/en/v2.3.2/guide/custom_env.html
 class TradingPlatform(gym.Env):
     class ExtraInfo:
+        # For evaluation
         action_values: Dict[datetime.date, Dict[PositionType, float]]
         actions: Dict[datetime.date, int]
         earning: float
+
+        # For investigation
+        earning_manipulation_count: int
 
         def __init__(self) -> None:
             self.action_values = {}
             self.actions = {}
             self.earning = 0
+            self.earning_manipulation_count = 0
 
     metadata = {"render_modes": ["rgb_array"]}
 
@@ -156,6 +161,7 @@ class TradingPlatform(gym.Env):
 
     # Hyperparameters
     _recent_days_num: int = 1
+    _high_freq_manipulation: Optional[Tuple[int]] = (1,)  # Number of holding days
 
     # State components
     # Episode-level, only changed if we reset to begin a new episode
@@ -220,6 +226,7 @@ class TradingPlatform(gym.Env):
 
     def step(self, action: np.int64) -> tuple[Dict[str, Any], SupportsFloat, bool, bool, dict[str, Any]]:
         position_type = PositionType(action)
+        earning_manipulation_factor = 1.0
         reward = 0
         # If the position type changes, close the current position and open a new one
         if (
@@ -247,12 +254,22 @@ class TradingPlatform(gym.Env):
             and self._date_index - self._recent_position_date_indices[0] > self._recent_days_num
         ):
             self._recent_position_date_indices.pop(0)
+        # Manipulate the earning based on the number of recent positions opened
+        if self._high_freq_manipulation is not None:
+            holding_days_num, = self._high_freq_manipulation
+            earning_manipulation_factor += max(
+                # TODO: Consider using `max(len(self._recent_position_date_indices) - 1, 0)` to ignore the current position
+                len(self._recent_position_date_indices) * holding_days_num / self._recent_days_num - 1,
+                0.0,
+            )
         # Use only the earning of SELL positions for rewards because:
         # - BUY positions are similar to holding, so performance depends mainly on SELL strategy.
         # - The optimal position amount for calculating rewards is unclear, whether using a fixed unit or the actual price.
         # Note that this doesn't mean it's not good to include the earning of BUY positions for reward.
         if self._positions[-1].position_type == PositionType.SELL:
-            reward += earning
+            if earning_manipulation_factor != 1.0:
+                self._extra_info.earning_manipulation_count += 1
+            reward += earning * max(earning_manipulation_factor, 0)
         # Read more about termination and truncation at:
         # - https://gymnasium.farama.org/v0.29.0/tutorials/gymnasium_basics/handling_time_limits/
         # - https://farama.org/Gymnasium-Terminated-Truncated-Step-API
