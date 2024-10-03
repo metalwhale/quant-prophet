@@ -155,6 +155,7 @@ class TradingPlatform(gym.Env):
     _historical_days_num: int  # Number of days used for retrieving historical data
 
     # Hyperparameters
+    _recent_days_num: int = 1
 
     # State components
     # Episode-level, only changed if we reset to begin a new episode
@@ -164,6 +165,9 @@ class TradingPlatform(gym.Env):
     _date_index: int  # Grows in the same episode, resets to 0 for a new episode
     _prices: List[DailyPrice]  # Updated whenever the date changes
     _positions: List[Position]  # Keeps adding positions in the same episode, clears them all for a new episode
+
+    # Reward contribution (for manipulating earnings or calculating penalties and bonuses)
+    _recent_position_date_indices: List[int]
 
     # Extra information
     _extra_info: ExtraInfo
@@ -208,6 +212,7 @@ class TradingPlatform(gym.Env):
         self._date_index = 0
         self._retrieve_prices()
         self._positions = []
+        self._recent_position_date_indices = []
         observation = self._obtain_observation()
         info = {}
         self._extra_info = self.ExtraInfo()
@@ -226,6 +231,7 @@ class TradingPlatform(gym.Env):
                 else self._prices[-1].actual_price
             position = Position(self._prices[-1].date, position_type, self._prices[-1], amount)
             self._positions.append(position)
+            self._recent_position_date_indices.append(self._date_index)
         # Recalculate position's net by first reverting net of the current date.
         # The net of the next date will be calculated later.
         earning = -self._positions[-1].amount * self._last_position_net_ratio
@@ -235,6 +241,12 @@ class TradingPlatform(gym.Env):
         # TODO: Consider if it is okay to include net of the next date in the reward
         earning += self._positions[-1].amount * self._last_position_net_ratio  # Net of the next date
         self._extra_info.earning += earning
+        # Remove the oldest recent position
+        if (
+            len(self._recent_position_date_indices) > 0
+            and self._date_index - self._recent_position_date_indices[0] > self._recent_days_num
+        ):
+            self._recent_position_date_indices.pop(0)
         # Use only the earning of SELL positions for rewards because:
         # - BUY positions are similar to holding, so performance depends mainly on SELL strategy.
         # - The optimal position amount for calculating rewards is unclear, whether using a fixed unit or the actual price.
